@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Painel Cornélio Move</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #111827;
+      color: white;
+      padding: 30px;
+    }
+
+    .container {
+      max-width: 700px;
+      margin: auto;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+
+    .subtitulo {
+      text-align: center;
+      color: #cbd5e1;
+      margin-bottom: 30px;
+    }
+
+    .card {
+      background: #1f2937;
+      padding: 20px;
+      border-radius: 16px;
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      margin-top: 12px;
+      margin-bottom: 6px;
+      color: #cbd5e1;
+    }
+
+    input {
+      width: 100%;
+      padding: 14px;
+      border-radius: 10px;
+      border: none;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 20px;
+      padding: 16px;
+      border-radius: 12px;
+      border: none;
+      background: #22c55e;
+      color: white;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #16a34a;
+    }
+
+    .status {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 10px;
+      background: #374151;
+      color: #e5e7eb;
+      text-align: center;
+    }
+
+    .motorista {
+      background: #111827;
+      padding: 14px;
+      border-radius: 10px;
+      margin-top: 10px;
+      color: #cbd5e1;
+      border: 2px solid transparent;
+    }
+
+    .motorista.selecionado {
+      border-color: #22c55e;
+      background: #064e3b;
+    }
+
+    .motorista button {
+      margin-top: 10px;
+      background: #2563eb;
+      font-size: 15px;
+      padding: 12px;
+    }
+
+    .motorista button:hover {
+      background: #1d4ed8;
+    }
+
+    .selecionado-texto {
+      color: #22c55e;
+      font-weight: bold;
+      margin-top: 8px;
+    }
+
+    .aviso {
+      color: #facc15;
+      font-weight: bold;
+    }
+
+    .aceita {
+      background: #14532d;
+      color: #dcfce7;
+    }
+
+    .recusada {
+      background: #7f1d1d;
+      color: #fee2e2;
+    }
+.finalizada {
+  background: #1e3a8a;
+  color: #dbeafe;
+}
+
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Cornélio Move</h1>
+    <div class="subtitulo">Painel de Despacho Rápido</div>
+
+    <div class="card">
+      <h2>Motorista selecionado</h2>
+      <div id="motoristaSelecionado" class="status aviso">
+        Nenhum motorista selecionado.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Nova chamada</h2>
+
+      <label>Cliente</label>
+      <input id="cliente" placeholder="Ex: Passageiro telefone" />
+
+      <label>Endereço de embarque</label>
+      <input id="endereco" placeholder="Ex: Rua Paraná, perto do Mercado" />
+
+      <label>Distância</label>
+      <input id="distancia" placeholder="Ex: 350 metros" />
+
+      <label>Tempo estimado</label>
+      <input id="tempo" placeholder="Ex: 2 minutos" />
+
+      <button onclick="despachar()">Despachar para motorista selecionado</button>
+
+      <div id="status" class="status">Aguardando despacho...</div>
+    </div>
+
+    <div class="card">
+      <h2>Motoristas online</h2>
+      <div id="motoristas">Carregando...</div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    let motoristaSelecionado = null;
+    let listaAtualMotoristas = [];
+
+    const socket = io();
+
+    socket.on("lista_motoristas", (motoristas) => {
+      listaAtualMotoristas = motoristas;
+      desenharMotoristas(motoristas);
+    });
+
+    socket.on("chamada_aceita", (dados) => {
+      const status = document.getElementById("status");
+      status.className = "status aceita";
+      status.innerText = `Chamada aceita por ${dados.nomeMotorista}.`;
+    });
+
+    socket.on("chamada_recusada", (dados) => {
+      const status = document.getElementById("status");
+      status.className = "status recusada";
+      status.innerText = `Chamada recusada por ${dados.nomeMotorista}.`;
+    });
+    socket.on("corrida_finalizada", (dados) => {
+  const status = document.getElementById("status");
+  status.className = "status finalizada";
+  status.innerText = `Corrida finalizada por ${dados.nomeMotorista}.`;
+});
+
+    function selecionarMotorista(socketId) {
+      motoristaSelecionado = listaAtualMotoristas.find((m) => m.socketId === socketId);
+
+      const divSelecionado = document.getElementById("motoristaSelecionado");
+
+      if (!motoristaSelecionado) {
+        divSelecionado.className = "status aviso";
+        divSelecionado.innerText = "Nenhum motorista selecionado.";
+        return;
+      }
+
+      divSelecionado.className = "status";
+      divSelecionado.innerHTML = `
+        <strong>${motoristaSelecionado.nome}</strong><br>
+        ID: ${motoristaSelecionado.idMotorista}<br>
+        Lat: ${motoristaSelecionado.latitude}<br>
+        Lng: ${motoristaSelecionado.longitude}
+      `;
+
+      desenharMotoristas(listaAtualMotoristas);
+    }
+
+    async function despachar() {
+      const cliente = document.getElementById("cliente").value;
+      const endereco = document.getElementById("endereco").value;
+      const distancia = document.getElementById("distancia").value;
+      const tempo = document.getElementById("tempo").value;
+
+      const status = document.getElementById("status");
+      status.className = "status";
+
+      if (!motoristaSelecionado) {
+        status.innerText = "Selecione um motorista antes de despachar.";
+        return;
+      }
+
+      if (!endereco) {
+        status.innerText = "Digite o endereço de embarque.";
+        return;
+      }
+
+      try {
+        const resposta = await fetch("/despachar-motorista", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            socketId: motoristaSelecionado.socketId,
+            cliente,
+            endereco,
+            distancia,
+            tempo,
+            origem: "Despacho rápido",
+          }),
+        });
+
+        const dados = await resposta.json();
+
+        if (dados.ok) {
+          status.innerText = dados.mensagem;
+        } else {
+          status.innerText = dados.mensagem || "Erro ao despachar.";
+        }
+      } catch (erro) {
+        status.innerText = "Erro ao conectar com o backend.";
+      }
+    }
+
+    async function carregarMotoristas() {
+      try {
+        const resposta = await fetch("/motoristas");
+        const motoristas = await resposta.json();
+
+        listaAtualMotoristas = motoristas;
+        desenharMotoristas(motoristas);
+      } catch (erro) {
+        document.getElementById("motoristas").innerHTML =
+          "Erro ao carregar motoristas.";
+      }
+    }
+
+    function desenharMotoristas(motoristas) {
+      const div = document.getElementById("motoristas");
+
+      if (motoristas.length === 0) {
+        div.innerHTML = "Nenhum motorista online.";
+        motoristaSelecionado = null;
+        document.getElementById("motoristaSelecionado").className = "status aviso";
+        document.getElementById("motoristaSelecionado").innerText =
+          "Nenhum motorista selecionado.";
+        return;
+      }
+
+      div.innerHTML = motoristas.map((m) => {
+        const selecionado =
+          motoristaSelecionado && motoristaSelecionado.socketId === m.socketId;
+
+        return `
+          <div class="motorista ${selecionado ? "selecionado" : ""}">
+            <strong>${m.nome}</strong><br>
+            ID: ${m.idMotorista}<br>
+            Lat: ${m.latitude}<br>
+            Lng: ${m.longitude}
+            ${selecionado ? `<div class="selecionado-texto">Selecionado</div>` : ""}
+            <button onclick="selecionarMotorista('${m.socketId}')">
+              Selecionar este motorista
+            </button>
+          </div>
+        `;
+      }).join("");
+    }
+
+    carregarMotoristas();
+    setInterval(carregarMotoristas, 2000);
+  </script>
+</body>
+</html>

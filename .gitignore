@@ -1,0 +1,32 @@
+# Dependências
+node_modules/
+**/node_modules/
+
+# Expo
+.expo/
+**/.expo/
+dist/
+web-build/
+
+# Builds
+build/
+android/
+ios/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Ambiente / segredos
+.env
+.env.*
+*.pem
+*.key
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# VS Code local
+.vscode/
