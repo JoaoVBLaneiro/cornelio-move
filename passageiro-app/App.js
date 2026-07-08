@@ -10,7 +10,7 @@ import {
 import * as Location from "expo-location";
 import { io } from "socket.io-client";
 
-const BACKEND_URL = "http://192.168.1.112:3001";
+const BACKEND_URL = "http://192.168.0.123:3001";
 
 export default function App() {
   const socketRef = useRef(null);
@@ -20,6 +20,7 @@ export default function App() {
   const [status, setStatus] = useState("Aguardando você chamar um mototáxi.");
   const [localizacao, setLocalizacao] = useState(null);
   const [motoristaAceitou, setMotoristaAceitou] = useState(null);
+  const [chamadaAtual, setChamadaAtual] = useState(null);
 
   useEffect(() => {
     socketRef.current = io(BACKEND_URL, {
@@ -46,10 +47,15 @@ export default function App() {
   ) {
     setBuscando(false);
     setMotoristaAceitou(null);
+    setChamadaAtual(null);
   }
 });
     socketRef.current.on("chamada_aceita_passageiro", (dados) => {
       setMotoristaAceitou(dados.nomeMotorista);
+      setChamadaAtual({
+        idChamada: dados.idChamada,
+        nomeMotorista: dados.nomeMotorista,
+      });
       setStatus(dados.mensagem);
       setBuscando(false);
     });
@@ -58,6 +64,15 @@ export default function App() {
       setStatus(dados.mensagem);
       setBuscando(false);
       setMotoristaAceitou(null);
+      setChamadaAtual(null);
+    });
+
+    socketRef.current.on("corrida_cancelada_passageiro", (dados) => {
+      setStatus(dados.mensagem || "Corrida cancelada.");
+      setBuscando(false);
+      setMotoristaAceitou(null);
+      setChamadaAtual(null);
+      Alert.alert("Corrida cancelada", dados.mensagem || "Corrida cancelada.");
     });
 
     return () => {
@@ -101,6 +116,7 @@ export default function App() {
     }
 
     setMotoristaAceitou(null);
+    setChamadaAtual(null);
     setBuscando(true);
     setStatus("Pegando sua localização...");
 
@@ -120,6 +136,59 @@ export default function App() {
       longitude: coords.longitude,
       accuracy: coords.accuracy,
     });
+  }
+
+  function executarCancelarCorrida() {
+    if (!chamadaAtual || !chamadaAtual.idChamada) {
+      Alert.alert("Atenção", "Não há corrida aceita para cancelar.");
+      return;
+    }
+
+    socketRef.current.emit(
+      "cancelar_corrida",
+      {
+        idChamada: chamadaAtual.idChamada,
+        origemCancelamento: "passageiro",
+      },
+      (resposta) => {
+        if (!resposta || !resposta.ok) {
+          Alert.alert(
+            "Não foi possível cancelar",
+            resposta?.mensagem || "Essa corrida não está mais disponível."
+          );
+          return;
+        }
+
+        setStatus(resposta.mensagem || "Corrida cancelada por você.");
+        setBuscando(false);
+        setMotoristaAceitou(null);
+        setChamadaAtual(null);
+        Alert.alert("Corrida cancelada", resposta.mensagem || "Corrida cancelada por você.");
+      }
+    );
+  }
+
+  function cancelarCorrida() {
+    if (!chamadaAtual || !chamadaAtual.idChamada) {
+      Alert.alert("Atenção", "Não há corrida aceita para cancelar.");
+      return;
+    }
+
+    Alert.alert(
+      "Cancelar corrida",
+      "Tem certeza que deseja cancelar esta corrida?",
+      [
+        {
+          text: "Não",
+          style: "cancel",
+        },
+        {
+          text: "Sim, cancelar",
+          style: "destructive",
+          onPress: executarCancelarCorrida,
+        },
+      ]
+    );
   }
 
   return (
@@ -157,9 +226,15 @@ export default function App() {
         <Text style={styles.status}>{status}</Text>
 
         {motoristaAceitou && (
-          <Text style={styles.motorista}>
-            Mototaxista: {motoristaAceitou}
-          </Text>
+          <>
+            <Text style={styles.motorista}>
+              Mototaxista: {motoristaAceitou}
+            </Text>
+
+            <TouchableOpacity style={styles.botaoCancelar} onPress={cancelarCorrida}>
+              <Text style={styles.textoBotaoCancelar}>Cancelar corrida</Text>
+            </TouchableOpacity>
+          </>
         )}
       </View>
 
@@ -277,6 +352,18 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     textAlign: "center",
     marginTop: 14,
+  },
+  botaoCancelar: {
+    backgroundColor: "#dc2626",
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 16,
+  },
+  textoBotaoCancelar: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "bold",
+    textAlign: "center",
   },
   localizacaoTexto: {
     color: "#cbd5e1",

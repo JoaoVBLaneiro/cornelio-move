@@ -5,13 +5,14 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import * as Location from "expo-location";
 import { io } from "socket.io-client";
 
-const BACKEND_URL = "http://192.168.1.112:3001";
+const BACKEND_URL = "http://192.168.0.123:3001";
 
 export default function App() {
   const socketRef = useRef(null);
@@ -23,11 +24,10 @@ export default function App() {
   const [carregando, setCarregando] = useState(false);
   const [chamadaAtual, setChamadaAtual] = useState(null);
   const [corridaAceita, setCorridaAceita] = useState(false);
+  const [modoLocalizacao, setModoLocalizacao] = useState("economico");
 
-  const motorista = {
-    idMotorista: "41",
-    nome: "Motorista Teste 41",
-  };
+  const [idMotorista, setIdMotorista] = useState("41");
+  const [nomeMotorista, setNomeMotorista] = useState("Motorista Teste 41");
 
   useEffect(() => {
     socketRef.current = io(BACKEND_URL, {
@@ -51,9 +51,61 @@ export default function App() {
       Alert.alert("Nova chamada", chamada.endereco);
     });
 
+    socketRef.current.on("cancelar_chamada", (dados) => {
+      setChamadaAtual((chamadaAtualAnterior) => {
+        if (
+          chamadaAtualAnterior &&
+          chamadaAtualAnterior.idChamada === dados.idChamada
+        ) {
+          setCorridaAceita(false);
+          Alert.alert("Chamada cancelada", dados.mensagem);
+          return null;
+        }
+
+        return chamadaAtualAnterior;
+      });
+    });
+
+    socketRef.current.on("chamada_indisponivel", (dados) => {
+      setChamadaAtual((chamadaAtualAnterior) => {
+        if (
+          chamadaAtualAnterior &&
+          chamadaAtualAnterior.idChamada === dados.idChamada
+        ) {
+          setCorridaAceita(false);
+          Alert.alert("Chamada indisponível", dados.mensagem);
+          return null;
+        }
+
+        return chamadaAtualAnterior;
+      });
+    });
+
+    socketRef.current.on("corrida_cancelada_motorista", async (dados) => {
+      setCorridaAceita(false);
+      setChamadaAtual((chamadaAtualAnterior) => {
+        if (
+          chamadaAtualAnterior &&
+          chamadaAtualAnterior.idChamada === dados.idChamada
+        ) {
+          Alert.alert("Corrida cancelada", dados.mensagem || "Corrida cancelada.");
+          return null;
+        }
+
+        return chamadaAtualAnterior;
+      });
+
+      await iniciarMonitoramentoLocalizacao("economico");
+    });
+
     return () => {
       if (socketRef.current) {
         socketRef.current.disconnect();
+      }
+
+      if (locationWatcherRef.current) {
+        locationWatcherRef.current.remove();
+        locationWatcherRef.current = null;
       }
     };
   }, []);
@@ -71,7 +123,7 @@ export default function App() {
       }
 
       const posicao = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
+        accuracy: Location.Accuracy.Balanced,
       });
 
       const coords = {
@@ -89,50 +141,63 @@ export default function App() {
       return null;
     }
   }
+
   async function pararMonitoramentoLocalizacao() {
-  if (locationWatcherRef.current) {
-    locationWatcherRef.current.remove();
-    locationWatcherRef.current = null;
-  }
-}
-
-async function iniciarMonitoramentoLocalizacao(modo = "economico") {
-  await pararMonitoramentoLocalizacao();
-
-  const configuracao =
-    modo === "alta_precisao"
-      ? {
-          accuracy: Location.Accuracy.High,
-          timeInterval: 10000,
-          distanceInterval: 30,
-        }
-      : {
-          accuracy: Location.Accuracy.Balanced,
-          timeInterval: 30000,
-          distanceInterval: 100,
-        };
-
-  const watcher = await Location.watchPositionAsync(configuracao, (posicao) => {
-    const coords = {
-      latitude: posicao.coords.latitude,
-      longitude: posicao.coords.longitude,
-      accuracy: posicao.coords.accuracy,
-      modoLocalizacao: modo,
-    };
-
-    setLocalizacao(coords);
-
-    if (socketRef.current) {
-      socketRef.current.emit("atualizar_localizacao", coords);
+    if (locationWatcherRef.current) {
+      locationWatcherRef.current.remove();
+      locationWatcherRef.current = null;
     }
-  });
+  }
 
-  locationWatcherRef.current = watcher;
-}
+  async function iniciarMonitoramentoLocalizacao(modo = "economico") {
+    await pararMonitoramentoLocalizacao();
+
+    setModoLocalizacao(modo);
+
+    const configuracao =
+      modo === "alta_precisao"
+        ? {
+            accuracy: Location.Accuracy.High,
+            timeInterval: 10000,
+            distanceInterval: 30,
+          }
+        : {
+            accuracy: Location.Accuracy.Balanced,
+            timeInterval: 30000,
+            distanceInterval: 100,
+          };
+
+    const watcher = await Location.watchPositionAsync(configuracao, (posicao) => {
+      const coords = {
+        latitude: posicao.coords.latitude,
+        longitude: posicao.coords.longitude,
+        accuracy: posicao.coords.accuracy,
+        modoLocalizacao: modo,
+      };
+
+      setLocalizacao(coords);
+
+      if (socketRef.current) {
+        socketRef.current.emit("atualizar_localizacao", coords);
+      }
+    });
+
+    locationWatcherRef.current = watcher;
+  }
 
   async function ficarOnlineOffline() {
     if (!conectado) {
       Alert.alert("Sem conexão", "O app ainda não conectou ao backend.");
+      return;
+    }
+
+    if (!idMotorista.trim()) {
+      Alert.alert("Atenção", "Digite o número/login do motorista.");
+      return;
+    }
+
+    if (!nomeMotorista.trim()) {
+      Alert.alert("Atenção", "Digite o nome do motorista.");
       return;
     }
 
@@ -142,8 +207,8 @@ async function iniciarMonitoramentoLocalizacao(modo = "economico") {
       if (!coords) return;
 
       socketRef.current.emit("motorista_online", {
-        idMotorista: motorista.idMotorista,
-        nome: motorista.nome,
+        idMotorista: idMotorista.trim(),
+        nome: nomeMotorista.trim(),
         latitude: coords.latitude,
         longitude: coords.longitude,
       });
@@ -154,37 +219,60 @@ async function iniciarMonitoramentoLocalizacao(modo = "economico") {
     } else {
       socketRef.current.emit("motorista_offline");
 
-     await pararMonitoramentoLocalizacao();
+      await pararMonitoramentoLocalizacao();
 
       setOnline(false);
       setLocalizacao(null);
       setChamadaAtual(null);
       setCorridaAceita(false);
+      setModoLocalizacao("economico");
     }
   }
 
- async function aceitarChamada() {
-  if (!chamadaAtual) return;
+  async function aceitarChamada() {
+    if (!chamadaAtual) return;
 
-  socketRef.current.emit("aceitar_chamada", {
-    idChamada: chamadaAtual.idChamada,
-    idMotorista: motorista.idMotorista,
-    nomeMotorista: motorista.nome,
-    endereco: chamadaAtual.endereco,
-  });
+    socketRef.current.emit(
+      "aceitar_chamada",
+      {
+        idChamada: chamadaAtual.idChamada,
+        tokenTentativa: chamadaAtual.tokenTentativa,
+        idMotorista: idMotorista.trim(),
+        nomeMotorista: nomeMotorista.trim(),
+        endereco: chamadaAtual.endereco,
+      },
+      async (resposta) => {
+        if (!resposta || !resposta.ok) {
+          Alert.alert(
+            "Chamada indisponível",
+            resposta?.mensagem || "Essa chamada não está mais disponível."
+          );
 
-  await iniciarMonitoramentoLocalizacao("alta_precisao");
+          setChamadaAtual(null);
+          setCorridaAceita(false);
 
-  setCorridaAceita(true);
-}
+          if (online) {
+            await iniciarMonitoramentoLocalizacao("economico");
+          }
+
+          return;
+        }
+
+        await iniciarMonitoramentoLocalizacao("alta_precisao");
+
+        setCorridaAceita(true);
+      }
+    );
+  }
 
   function recusarChamada() {
     if (!chamadaAtual) return;
 
     socketRef.current.emit("recusar_chamada", {
       idChamada: chamadaAtual.idChamada,
-      idMotorista: motorista.idMotorista,
-      nomeMotorista: motorista.nome,
+      tokenTentativa: chamadaAtual.tokenTentativa,
+      idMotorista: idMotorista.trim(),
+      nomeMotorista: nomeMotorista.trim(),
       endereco: chamadaAtual.endereco,
     });
 
@@ -192,19 +280,94 @@ async function iniciarMonitoramentoLocalizacao(modo = "economico") {
     setCorridaAceita(false);
   }
 
-  async function finalizarCorrida() {
-  if (!chamadaAtual) return;
+  async function executarFinalizarCorrida() {
+    if (!chamadaAtual) return;
 
-  socketRef.current.emit("finalizar_corrida", {
-    idChamada: chamadaAtual.idChamada,
-    idMotorista: motorista.idMotorista,
-    nomeMotorista: motorista.nome,
-    endereco: chamadaAtual.endereco,
-  });
-await iniciarMonitoramentoLocalizacao("economico");
-  setChamadaAtual(null);
-  setCorridaAceita(false);
-}
+    socketRef.current.emit("finalizar_corrida", {
+      idChamada: chamadaAtual.idChamada,
+      tokenTentativa: chamadaAtual.tokenTentativa,
+      idMotorista: idMotorista.trim(),
+      nomeMotorista: nomeMotorista.trim(),
+      endereco: chamadaAtual.endereco,
+    });
+
+    await iniciarMonitoramentoLocalizacao("economico");
+
+    setChamadaAtual(null);
+    setCorridaAceita(false);
+  }
+
+  function finalizarCorrida() {
+    if (!chamadaAtual) return;
+
+    Alert.alert(
+      "Finalizar corrida",
+      "Tem certeza que deseja finalizar esta corrida?",
+      [
+        {
+          text: "Não",
+          style: "cancel",
+        },
+        {
+          text: "Sim, finalizar",
+          style: "destructive",
+          onPress: executarFinalizarCorrida,
+        },
+      ]
+    );
+  }
+
+  async function executarCancelarCorrida() {
+    if (!chamadaAtual || !corridaAceita) return;
+
+    socketRef.current.emit(
+      "cancelar_corrida",
+      {
+        idChamada: chamadaAtual.idChamada,
+        tokenTentativa: chamadaAtual.tokenTentativa,
+        idMotorista: idMotorista.trim(),
+        nomeMotorista: nomeMotorista.trim(),
+        endereco: chamadaAtual.endereco,
+        origemCancelamento: "motorista",
+      },
+      async (resposta) => {
+        if (!resposta || !resposta.ok) {
+          Alert.alert(
+            "Não foi possível cancelar",
+            resposta?.mensagem || "Essa corrida não está mais disponível."
+          );
+          return;
+        }
+
+        await iniciarMonitoramentoLocalizacao("economico");
+
+        setChamadaAtual(null);
+        setCorridaAceita(false);
+
+        Alert.alert("Corrida cancelada", resposta.mensagem || "Corrida cancelada por você.");
+      }
+    );
+  }
+
+  function cancelarCorrida() {
+    if (!chamadaAtual || !corridaAceita) return;
+
+    Alert.alert(
+      "Cancelar corrida",
+      "Tem certeza que deseja cancelar esta corrida?",
+      [
+        {
+          text: "Não",
+          style: "cancel",
+        },
+        {
+          text: "Sim, cancelar",
+          style: "destructive",
+          onPress: executarCancelarCorrida,
+        },
+      ]
+    );
+  }
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -219,6 +382,29 @@ await iniciarMonitoramentoLocalizacao("economico");
           {conectado ? "CONECTADO" : "DESCONECTADO"}
         </Text>
         <Text style={styles.url}>{BACKEND_URL}</Text>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.label}>Identificação do motorista</Text>
+
+        <TextInput
+          style={styles.input}
+          placeholder="Número/Login do motorista"
+          placeholderTextColor="#9ca3af"
+          value={idMotorista}
+          onChangeText={setIdMotorista}
+          editable={!online}
+          keyboardType="numeric"
+        />
+
+        <TextInput
+          style={styles.input}
+          placeholder="Nome do motorista"
+          placeholderTextColor="#9ca3af"
+          value={nomeMotorista}
+          onChangeText={setNomeMotorista}
+          editable={!online}
+        />
       </View>
 
       <View style={styles.card}>
@@ -237,6 +423,12 @@ await iniciarMonitoramentoLocalizacao("economico");
             {carregando ? "Buscando GPS..." : online ? "Ficar Offline" : "Ficar Online"}
           </Text>
         </TouchableOpacity>
+
+        {online && (
+          <Text style={styles.modoTexto}>
+            Modo GPS: {modoLocalizacao === "alta_precisao" ? "Alta precisão" : "Econômico"}
+          </Text>
+        )}
 
         {localizacao && (
           <View style={styles.caixaLocalizacao}>
@@ -257,7 +449,7 @@ await iniciarMonitoramentoLocalizacao("economico");
         <View style={styles.cardAguardando}>
           <Text style={styles.aguardandoTitulo}>Aguardando chamada</Text>
           <Text style={styles.aguardandoTexto}>
-            Quando o painel despachar uma corrida, ela aparecerá aqui.
+            Quando o painel ou passageiro despachar uma corrida, ela aparecerá aqui.
           </Text>
         </View>
       )}
@@ -271,6 +463,10 @@ await iniciarMonitoramentoLocalizacao("economico");
           <Text style={styles.info}>Distância: {chamadaAtual.distancia}</Text>
           <Text style={styles.info}>Tempo: {chamadaAtual.tempo}</Text>
           <Text style={styles.info}>Origem: {chamadaAtual.origem}</Text>
+
+          {chamadaAtual.observacao && (
+            <Text style={styles.info}>Obs: {chamadaAtual.observacao}</Text>
+          )}
 
           <View style={styles.linhaBotoes}>
             <TouchableOpacity style={styles.botaoAceitar} onPress={aceitarChamada}>
@@ -292,9 +488,13 @@ await iniciarMonitoramentoLocalizacao("economico");
 
           <TouchableOpacity
             style={styles.botaoAzul}
-            onPress={() => Alert.alert("Navegação", "Depois vamos abrir o Google Maps aqui.")}
+            onPress={() => Alert.alert("Navegação", "Depois vamos abrir Google Maps/Waze aqui.")}
           >
             <Text style={styles.textoBotao}>Abrir navegação</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.botaoCancelar} onPress={cancelarCorrida}>
+            <Text style={styles.textoBotao}>Cancelar corrida</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.botaoPreto} onPress={finalizarCorrida}>
@@ -335,6 +535,15 @@ const styles = StyleSheet.create({
     color: "#94a3b8",
     textAlign: "center",
     fontSize: 14,
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: "#111827",
+    color: "#ffffff",
+    padding: 14,
+    borderRadius: 10,
+    marginTop: 10,
+    fontSize: 16,
   },
   verdeGrande: {
     color: "#22c55e",
@@ -385,6 +594,13 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontWeight: "bold",
     fontSize: 16,
+  },
+  modoTexto: {
+    color: "#facc15",
+    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "bold",
+    marginTop: 14,
   },
   caixaLocalizacao: {
     backgroundColor: "#111827",
@@ -462,6 +678,12 @@ const styles = StyleSheet.create({
   },
   botaoAzul: {
     backgroundColor: "#2563eb",
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  botaoCancelar: {
+    backgroundColor: "#dc2626",
     padding: 16,
     borderRadius: 12,
     marginBottom: 12,
