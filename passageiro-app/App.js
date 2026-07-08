@@ -10,7 +10,7 @@ import {
 import * as Location from "expo-location";
 import { io } from "socket.io-client";
 
-const BACKEND_URL = "http://192.168.0.123:3001";
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 export default function App() {
   const socketRef = useRef(null);
