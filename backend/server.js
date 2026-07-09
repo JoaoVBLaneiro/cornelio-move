@@ -306,6 +306,10 @@ async function obterCoordenadasPorEndereco(enderecoDigitado) {
       latitude,
       longitude,
       enderecoFormatado,
+      resultType: resultado.result_type || null,
+      housenumber: resultado.housenumber || null,
+      street: resultado.street || null,
+      city: resultado.city || resultado.county || null,
     };
   } catch (error) {
     console.log("Falha ao consultar Geoapify para endereço digitado:", error.message);
@@ -1200,8 +1204,63 @@ app.post("/auth/login-motorista", async (req, res) => {
 });
 
 
+app.post("/admin/buscar-endereco", async (req, res) => {
+  const { secret, endereco } = req.body;
+
+  if (!validarAdminSecret(secret)) {
+    return res.status(401).json({
+      ok: false,
+      mensagem: "Senha administrativa inválida.",
+    });
+  }
+
+  const enderecoDigitado = String(endereco || "").trim();
+
+  if (!enderecoDigitado) {
+    return res.status(400).json({
+      ok: false,
+      mensagem: "Informe o endereço para buscar.",
+    });
+  }
+
+  const coordenadas = await obterCoordenadasPorEndereco(enderecoDigitado);
+
+  if (!coordenadas) {
+    return res.status(404).json({
+      ok: false,
+      mensagem: "Não foi possível localizar esse endereço. Tente informar rua, número, bairro e cidade.",
+    });
+  }
+
+  const aviso = coordenadas.housenumber
+    ? null
+    : "Atenção: a API não confirmou número no endereço. Confira com o cliente antes de despachar.";
+
+  return res.json({
+    ok: true,
+    mensagem: "Endereço localizado.",
+    enderecoDigitado,
+    enderecoFormatado: coordenadas.enderecoFormatado,
+    latitude: coordenadas.latitude,
+    longitude: coordenadas.longitude,
+    resultType: coordenadas.resultType,
+    housenumber: coordenadas.housenumber,
+    street: coordenadas.street,
+    city: coordenadas.city,
+    aviso,
+  });
+});
+
 app.post("/admin/despacho-rapido", async (req, res) => {
-  const { secret, cliente, endereco, observacao } = req.body;
+  const {
+    secret,
+    cliente,
+    endereco,
+    observacao,
+    enderecoConfirmado,
+    latitude,
+    longitude,
+  } = req.body;
 
   if (!validarAdminSecret(secret)) {
     return res.status(401).json({
@@ -1219,7 +1278,32 @@ app.post("/admin/despacho-rapido", async (req, res) => {
     });
   }
 
-  const coordenadas = await obterCoordenadasPorEndereco(enderecoDigitado);
+  const latitudeConfirmada = Number(latitude);
+  const longitudeConfirmada = Number(longitude);
+  const enderecoConfirmadoLimpo = String(enderecoConfirmado || "").trim();
+
+  let coordenadas = null;
+
+  if (
+    Number.isFinite(latitudeConfirmada) &&
+    Number.isFinite(longitudeConfirmada) &&
+    enderecoConfirmadoLimpo
+  ) {
+    coordenadas = {
+      latitude: latitudeConfirmada,
+      longitude: longitudeConfirmada,
+      enderecoFormatado: enderecoConfirmadoLimpo,
+    };
+
+    console.log("Despacho rápido usando endereço previamente confirmado:", {
+      enderecoDigitado,
+      enderecoConfirmado: enderecoConfirmadoLimpo,
+      latitude: latitudeConfirmada,
+      longitude: longitudeConfirmada,
+    });
+  } else {
+    coordenadas = await obterCoordenadasPorEndereco(enderecoDigitado);
+  }
 
   if (!coordenadas) {
     return res.status(400).json({
@@ -1244,9 +1328,9 @@ app.post("/admin/despacho-rapido", async (req, res) => {
 
   const chamada = {
     idChamada,
-    cliente: String(cliente || "").trim() || "Passageiro do despacho rápido",
+    cliente: String(cliente || "").trim() || "Despacho rápido",
     endereco: coordenadas.enderecoFormatado || enderecoDigitado,
-    observacao: String(observacao || "").trim() || "Despacho rápido pela central",
+    observacao: String(observacao || "").trim() || "Sem observação",
     latitudePassageiro: coordenadas.latitude,
     longitudePassageiro: coordenadas.longitude,
     origem: "Despacho rápido",

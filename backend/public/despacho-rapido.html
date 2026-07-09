@@ -67,10 +67,50 @@
     }
     .btn-primary { background: #22c55e; color: #111827; }
     .btn-secondary { background: #2563eb; color: #ffffff; width: auto; }
-    .row {
+    .endereco-linha {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
+      grid-template-columns: minmax(0, 1fr) 56px;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .btn-lupa {
+      width: 56px;
+      margin-top: 0;
+      padding: 0;
+      font-size: 22px;
+      background: #2563eb;
+      color: #ffffff;
+      border-radius: 10px;
+    }
+    .resultado-endereco {
+      display: none;
+      background: #111827;
+      border: 1px solid #374151;
+      border-radius: 12px;
+      padding: 14px;
+      margin-top: 14px;
+    }
+    .resultado-titulo {
+      color: #93c5fd;
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+    .resultado-texto {
+      color: #ffffff;
+      line-height: 1.4;
+      font-weight: bold;
+    }
+    .resultado-coordenadas {
+      color: #94a3b8;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    .resultado-aviso {
+      color: #facc15;
+      font-size: 13px;
+      margin-top: 10px;
+      line-height: 1.4;
+      font-weight: bold;
     }
     .status {
       margin-top: 12px;
@@ -102,7 +142,6 @@
       margin-top: 8px;
     }
     @media (max-width: 700px) {
-      .row { grid-template-columns: 1fr; }
       body { padding: 12px; }
       table { font-size: 13px; }
     }
@@ -123,15 +162,17 @@
       <label>Senha administrativa da central</label>
       <input id="adminSecret" type="password" placeholder="Senha da central" />
 
-      <div class="row">
-        <div>
-          <label>Cliente / referência</label>
-          <input id="cliente" placeholder="Ex: Cliente da ligação, mercado, portaria..." />
-        </div>
-        <div>
-          <label>Endereço de embarque</label>
-          <input id="endereco" placeholder="Ex: Rua Carlos Gomes 774, Cornélio Procópio" />
-        </div>
+      <label>Endereço de embarque</label>
+      <div class="endereco-linha">
+        <input id="endereco" placeholder="Ex: Rua Carlos Gomes 774, Cornélio Procópio" oninput="limparEnderecoConfirmado()" />
+        <button class="btn-lupa" onclick="buscarEndereco()" title="Conferir endereço localizado pela API">🔍</button>
+      </div>
+
+      <div id="resultadoEndereco" class="resultado-endereco">
+        <div class="resultado-titulo">Endereço localizado pela API</div>
+        <div id="resultadoEnderecoTexto" class="resultado-texto"></div>
+        <div id="resultadoEnderecoCoordenadas" class="resultado-coordenadas"></div>
+        <div id="resultadoEnderecoAviso" class="resultado-aviso"></div>
       </div>
 
       <label>Observação</label>
@@ -140,7 +181,7 @@
       <button class="btn-primary" onclick="despachar()">Despachar para motorista mais próximo</button>
 
       <p class="hint">
-        O backend converte o endereço em coordenadas pela Geoapify e envia para o mototaxista disponível mais próximo. Se ele não aceitar em 15 segundos, tenta o próximo.
+        A lupa apenas confere o endereço encontrado pela API. Se você despachar sem clicar na lupa, o sistema segue o fluxo atual: converte o endereço automaticamente e envia para o motorista disponível mais próximo.
       </p>
 
       <div id="status" class="status"></div>
@@ -167,6 +208,7 @@
   <script>
     const socket = io();
     let ultimaChamadaId = null;
+    let enderecoConfirmado = null;
 
     function setStatus(mensagem, erro = false) {
       const el = document.getElementById('status');
@@ -176,6 +218,14 @@
 
     function getSecret() {
       return document.getElementById('adminSecret').value;
+    }
+
+    function limparEnderecoConfirmado() {
+      enderecoConfirmado = null;
+      document.getElementById('resultadoEndereco').style.display = 'none';
+      document.getElementById('resultadoEnderecoTexto').textContent = '';
+      document.getElementById('resultadoEnderecoCoordenadas').textContent = '';
+      document.getElementById('resultadoEnderecoAviso').textContent = '';
     }
 
     function statusLabel(status) {
@@ -242,9 +292,58 @@
       }
     }
 
+    async function buscarEndereco() {
+      const secret = getSecret();
+      const endereco = document.getElementById('endereco').value.trim();
+
+      if (!secret) {
+        setStatus('Informe a senha administrativa.', true);
+        return;
+      }
+
+      if (!endereco) {
+        setStatus('Informe o endereço de embarque para buscar.', true);
+        return;
+      }
+
+      setStatus('Consultando endereço na Geoapify...');
+      limparEnderecoConfirmado();
+
+      try {
+        const resposta = await fetch('/admin/buscar-endereco', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secret, endereco }),
+        });
+
+        const dados = await resposta.json();
+
+        if (!resposta.ok || !dados.ok) {
+          setStatus(dados.mensagem || 'Não foi possível localizar esse endereço.', true);
+          return;
+        }
+
+        enderecoConfirmado = {
+          enderecoDigitado: endereco,
+          enderecoFormatado: dados.enderecoFormatado,
+          latitude: dados.latitude,
+          longitude: dados.longitude,
+        };
+
+        document.getElementById('resultadoEnderecoTexto').textContent = dados.enderecoFormatado;
+        document.getElementById('resultadoEnderecoCoordenadas').textContent =
+          `Coordenadas: ${Number(dados.latitude).toFixed(6)}, ${Number(dados.longitude).toFixed(6)}`;
+        document.getElementById('resultadoEnderecoAviso').textContent = dados.aviso || '';
+        document.getElementById('resultadoEndereco').style.display = 'block';
+
+        setStatus('Endereço localizado. Confira antes de despachar.');
+      } catch (error) {
+        setStatus('Erro de conexão ao buscar endereço.', true);
+      }
+    }
+
     async function despachar() {
       const secret = getSecret();
-      const cliente = document.getElementById('cliente').value.trim();
       const endereco = document.getElementById('endereco').value.trim();
       const observacao = document.getElementById('observacao').value.trim();
 
@@ -258,13 +357,22 @@
         return;
       }
 
-      setStatus('Convertendo endereço e procurando motorista disponível...');
+      const payload = { secret, endereco, observacao };
+
+      if (enderecoConfirmado && enderecoConfirmado.enderecoDigitado === endereco) {
+        payload.enderecoConfirmado = enderecoConfirmado.enderecoFormatado;
+        payload.latitude = enderecoConfirmado.latitude;
+        payload.longitude = enderecoConfirmado.longitude;
+        setStatus('Usando endereço conferido. Procurando motorista disponível...');
+      } else {
+        setStatus('Convertendo endereço e procurando motorista disponível...');
+      }
 
       try {
         const resposta = await fetch('/admin/despacho-rapido', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ secret, cliente, endereco, observacao }),
+          body: JSON.stringify(payload),
         });
 
         const dados = await resposta.json();
