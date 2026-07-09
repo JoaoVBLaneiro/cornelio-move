@@ -30,3 +30,5 @@ Thumbs.db
 
 # VS Code local
 .vscode/
+
+backend/data/
