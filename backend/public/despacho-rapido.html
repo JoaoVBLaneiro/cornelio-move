@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Despacho Rápido - Cornélio Move</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #111827;
+      color: #f9fafb;
+      padding: 24px;
+    }
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    h1, h2 { text-align: center; }
+    a {
+      color: #93c5fd;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    .nav {
+      text-align: center;
+      margin-bottom: 18px;
+    }
+    .card {
+      background: #1f2937;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    }
+    label {
+      display: block;
+      color: #cbd5e1;
+      font-size: 14px;
+      margin-bottom: 6px;
+      margin-top: 12px;
+    }
+    input, textarea {
+      width: 100%;
+      background: #111827;
+      color: #ffffff;
+      border: 1px solid #374151;
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 16px;
+    }
+    textarea {
+      min-height: 90px;
+      resize: vertical;
+    }
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 14px;
+      font-size: 16px;
+      width: 100%;
+    }
+    .btn-primary { background: #22c55e; color: #111827; }
+    .btn-secondary { background: #2563eb; color: #ffffff; width: auto; }
+    .row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .status {
+      margin-top: 12px;
+      font-weight: bold;
+      text-align: center;
+      white-space: pre-line;
+      line-height: 1.4;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      overflow: hidden;
+      border-radius: 12px;
+    }
+    th, td {
+      border-bottom: 1px solid #374151;
+      padding: 10px;
+      text-align: left;
+    }
+    th { color: #94a3b8; }
+    .disponivel { color: #22c55e; font-weight: bold; }
+    .tocando { color: #facc15; font-weight: bold; }
+    .ocupado { color: #ef4444; font-weight: bold; }
+    .hint {
+      color: #94a3b8;
+      font-size: 13px;
+      line-height: 1.4;
+      margin-top: 8px;
+    }
+    @media (max-width: 700px) {
+      .row { grid-template-columns: 1fr; }
+      body { padding: 12px; }
+      table { font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Cornélio Move</h1>
+    <h2>Despacho Rápido</h2>
+
+    <div class="nav">
+      <a href="/admin-motoristas.html">Cadastro de motoristas</a>
+    </div>
+
+    <div class="card">
+      <h2>Nova corrida pela central</h2>
+
+      <label>Senha administrativa da central</label>
+      <input id="adminSecret" type="password" placeholder="Senha da central" />
+
+      <div class="row">
+        <div>
+          <label>Cliente / referência</label>
+          <input id="cliente" placeholder="Ex: Cliente da ligação, mercado, portaria..." />
+        </div>
+        <div>
+          <label>Endereço de embarque</label>
+          <input id="endereco" placeholder="Ex: Rua Carlos Gomes 774, Cornélio Procópio" />
+        </div>
+      </div>
+
+      <label>Observação</label>
+      <textarea id="observacao" placeholder="Ex: casa azul, próximo ao mercado, cliente no portão..."></textarea>
+
+      <button class="btn-primary" onclick="despachar()">Despachar para motorista mais próximo</button>
+
+      <p class="hint">
+        O backend converte o endereço em coordenadas pela Geoapify e envia para o mototaxista disponível mais próximo. Se ele não aceitar em 15 segundos, tenta o próximo.
+      </p>
+
+      <div id="status" class="status"></div>
+    </div>
+
+    <div class="card">
+      <h2>Motoristas online</h2>
+      <button class="btn-secondary" onclick="carregarMotoristasOnline()">Atualizar lista</button>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Login</th>
+            <th>Nome</th>
+            <th>Status</th>
+            <th>GPS</th>
+          </tr>
+        </thead>
+        <tbody id="listaMotoristas"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    let ultimaChamadaId = null;
+
+    function setStatus(mensagem, erro = false) {
+      const el = document.getElementById('status');
+      el.textContent = mensagem;
+      el.style.color = erro ? '#ef4444' : '#22c55e';
+    }
+
+    function getSecret() {
+      return document.getElementById('adminSecret').value;
+    }
+
+    function statusLabel(status) {
+      if (status === 'ocupado') return 'Ocupado';
+      if (status === 'tocando') return 'Recebendo chamada';
+      return 'Disponível';
+    }
+
+    function statusClasse(status) {
+      if (status === 'ocupado') return 'ocupado';
+      if (status === 'tocando') return 'tocando';
+      return 'disponivel';
+    }
+
+    function renderMotoristas(motoristas) {
+      const tbody = document.getElementById('listaMotoristas');
+      tbody.innerHTML = '';
+
+      motoristas.forEach((motorista) => {
+        const tr = document.createElement('tr');
+
+        const tdLogin = document.createElement('td');
+        tdLogin.textContent = motorista.idMotorista || motorista.login || '-';
+
+        const tdNome = document.createElement('td');
+        tdNome.textContent = motorista.nome || '-';
+
+        const tdStatus = document.createElement('td');
+        const status = motorista.statusOperacional || 'disponivel';
+        tdStatus.textContent = statusLabel(status);
+        tdStatus.className = statusClasse(status);
+
+        const tdGps = document.createElement('td');
+        if (Number.isFinite(Number(motorista.latitude)) && Number.isFinite(Number(motorista.longitude))) {
+          tdGps.textContent = `${Number(motorista.latitude).toFixed(5)}, ${Number(motorista.longitude).toFixed(5)}`;
+        } else {
+          tdGps.textContent = '-';
+        }
+
+        tr.appendChild(tdLogin);
+        tr.appendChild(tdNome);
+        tr.appendChild(tdStatus);
+        tr.appendChild(tdGps);
+        tbody.appendChild(tr);
+      });
+
+      if (motoristas.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 4;
+        td.textContent = 'Nenhum motorista online no momento.';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function carregarMotoristasOnline() {
+      try {
+        const resposta = await fetch('/motoristas');
+        const motoristas = await resposta.json();
+        renderMotoristas(motoristas);
+      } catch (error) {
+        setStatus('Erro ao carregar motoristas online.', true);
+      }
+    }
+
+    async function despachar() {
+      const secret = getSecret();
+      const cliente = document.getElementById('cliente').value.trim();
+      const endereco = document.getElementById('endereco').value.trim();
+      const observacao = document.getElementById('observacao').value.trim();
+
+      if (!secret) {
+        setStatus('Informe a senha administrativa.', true);
+        return;
+      }
+
+      if (!endereco) {
+        setStatus('Informe o endereço de embarque.', true);
+        return;
+      }
+
+      setStatus('Convertendo endereço e procurando motorista disponível...');
+
+      try {
+        const resposta = await fetch('/admin/despacho-rapido', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secret, cliente, endereco, observacao }),
+        });
+
+        const dados = await resposta.json();
+
+        if (!resposta.ok || !dados.ok) {
+          setStatus(dados.mensagem || 'Erro ao despachar corrida.', true);
+          return;
+        }
+
+        ultimaChamadaId = dados.idChamada;
+
+        setStatus(
+          `${dados.mensagem}\n` +
+          `Endereço: ${dados.endereco}\n` +
+          `Primeiro motorista: ${dados.primeiroMotorista.nome} (${dados.primeiroMotorista.distancia}, ${dados.primeiroMotorista.tempo})`
+        );
+
+        await carregarMotoristasOnline();
+      } catch (error) {
+        setStatus('Erro de conexão com o backend.', true);
+      }
+    }
+
+    socket.on('lista_motoristas', (motoristas) => {
+      renderMotoristas(motoristas);
+    });
+
+    socket.on('chamada_aceita', (dados) => {
+      if (!ultimaChamadaId || dados.idChamada !== ultimaChamadaId) return;
+
+      setStatus(`Corrida aceita por ${dados.nomeMotorista}.`);
+      carregarMotoristasOnline();
+    });
+
+    socket.on('chamada_recusada', (dados) => {
+      if (!ultimaChamadaId || dados.idChamada !== ultimaChamadaId) return;
+
+      setStatus(`${dados.nomeMotorista} recusou. Tentando próximo motorista...`);
+      carregarMotoristasOnline();
+    });
+
+    socket.on('chamada_sem_atendimento', (dados) => {
+      if (!ultimaChamadaId || dados.idChamada !== ultimaChamadaId) return;
+
+      setStatus('Nenhum motorista aceitou essa corrida.', true);
+      carregarMotoristasOnline();
+    });
+
+    socket.on('corrida_finalizada', (dados) => {
+      if (!ultimaChamadaId || dados.idChamada !== ultimaChamadaId) return;
+
+      setStatus(`Corrida finalizada por ${dados.nomeMotorista || 'motorista'}.`);
+      carregarMotoristasOnline();
+    });
+
+    socket.on('corrida_cancelada', (dados) => {
+      if (!ultimaChamadaId || dados.idChamada !== ultimaChamadaId) return;
+
+      setStatus(dados.mensagem || 'Corrida cancelada.', true);
+      carregarMotoristasOnline();
+    });
+
+    carregarMotoristasOnline();
+  </script>
+</body>
+</html>

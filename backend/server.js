@@ -229,6 +229,91 @@ async function obterEnderecoPorCoordenadas(latitude, longitude) {
   }
 }
 
+
+async function obterCoordenadasPorEndereco(enderecoDigitado) {
+  const enderecoLimpo = String(enderecoDigitado || "").trim();
+
+  if (!enderecoLimpo) {
+    return null;
+  }
+
+  if (!podeConsultarGeoapify()) {
+    return null;
+  }
+
+  geoapifyUso.consultas += 1;
+
+  const textoBusca = /corn[eé]lio|proc[oó]pio/i.test(enderecoLimpo)
+    ? enderecoLimpo
+    : `${enderecoLimpo}, Cornélio Procópio, Paraná, Brasil`;
+
+  const params = new URLSearchParams({
+    text: textoBusca,
+    lang: "pt",
+    format: "json",
+    limit: "1",
+    filter: "countrycode:br",
+    bias: "proximity:-50.6467,-23.1818",
+    apiKey: GEOAPIFY_API_KEY,
+  });
+
+  const url = `https://api.geoapify.com/v1/geocode/search?${params.toString()}`;
+
+  try {
+    const resposta = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!resposta.ok) {
+      console.log("Erro na Geoapify ao buscar endereço:", {
+        status: resposta.status,
+        statusText: resposta.statusText,
+      });
+      return null;
+    }
+
+    const dados = await resposta.json();
+    const resultado = Array.isArray(dados.results) ? dados.results[0] : null;
+
+    if (!resultado) {
+      console.log("Geoapify não encontrou coordenadas para o endereço:", enderecoLimpo);
+      return null;
+    }
+
+    const latitude = Number(resultado.lat);
+    const longitude = Number(resultado.lon);
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      console.log("Geoapify retornou coordenadas inválidas:", resultado);
+      return null;
+    }
+
+    const enderecoFormatado = montarEnderecoGeoapify(resultado) || enderecoLimpo;
+
+    console.log("Endereço convertido pela Geoapify:", {
+      enderecoDigitado: enderecoLimpo,
+      enderecoFormatado,
+      latitude,
+      longitude,
+      consultasHoje: geoapifyUso.consultas,
+      limiteDiario: GEOAPIFY_DAILY_LIMIT,
+    });
+
+    return {
+      latitude,
+      longitude,
+      enderecoFormatado,
+    };
+  } catch (error) {
+    console.log("Falha ao consultar Geoapify para endereço digitado:", error.message);
+    return null;
+  }
+}
+
+
 function enviarListaMotoristas() {
   io.emit("lista_motoristas", Array.from(motoristas.values()));
 }
@@ -273,6 +358,7 @@ function estimarTempo(metros) {
 
 function listarMotoristasPorProximidade(latitude, longitude) {
   return Array.from(motoristas.values())
+    .filter((motorista) => motorista.online && motorista.statusOperacional === "disponivel")
     .map((motorista) => {
       const distanciaMetros = calcularDistanciaMetros(
         latitude,
@@ -288,6 +374,52 @@ function listarMotoristasPorProximidade(latitude, longitude) {
     })
     .sort((a, b) => a.distanciaMetros - b.distanciaMetros);
 }
+
+function marcarMotoristaDisponivel(socketId) {
+  const motorista = motoristas.get(socketId);
+
+  if (!motorista) {
+    return;
+  }
+
+  motorista.statusOperacional = "disponivel";
+  motorista.chamadaAtualId = null;
+  motorista.atualizadoEm = new Date();
+
+  motoristas.set(socketId, motorista);
+  enviarListaMotoristas();
+}
+
+function marcarMotoristaTocando(socketId, idChamada) {
+  const motorista = motoristas.get(socketId);
+
+  if (!motorista) {
+    return;
+  }
+
+  motorista.statusOperacional = "tocando";
+  motorista.chamadaAtualId = idChamada;
+  motorista.atualizadoEm = new Date();
+
+  motoristas.set(socketId, motorista);
+  enviarListaMotoristas();
+}
+
+function marcarMotoristaOcupado(socketId, idChamada) {
+  const motorista = motoristas.get(socketId);
+
+  if (!motorista) {
+    return;
+  }
+
+  motorista.statusOperacional = "ocupado";
+  motorista.chamadaAtualId = idChamada;
+  motorista.atualizadoEm = new Date();
+
+  motoristas.set(socketId, motorista);
+  enviarListaMotoristas();
+}
+
 
 function limparTimeoutChamada(chamada) {
   if (chamada && chamada.timeoutId) {
@@ -305,15 +437,15 @@ function tentarProximoMotorista(idChamada, motivo = "proxima_tentativa") {
 
   limparTimeoutChamada(chamada);
 
-  if (
-    chamada.status === "tentando_motorista" &&
-    chamada.motoristaAtual &&
-    motivo !== "recusada"
-  ) {
-    io.to(chamada.motoristaAtual.socketId).emit("cancelar_chamada", {
-      idChamada,
-      mensagem: "Essa chamada foi enviada para outro mototaxista.",
-    });
+  if (chamada.status === "tentando_motorista" && chamada.motoristaAtual) {
+    if (motivo !== "recusada") {
+      io.to(chamada.motoristaAtual.socketId).emit("cancelar_chamada", {
+        idChamada,
+        mensagem: "Essa chamada foi enviada para outro mototaxista.",
+      });
+    }
+
+    marcarMotoristaDisponivel(chamada.motoristaAtual.socketId);
   }
 
   chamada.indiceAtual += 1;
@@ -335,6 +467,7 @@ function tentarProximoMotorista(idChamada, motivo = "proxima_tentativa") {
 
     console.log("Nenhum motorista aceitou a chamada:", idChamada);
 
+    chamadas.delete(idChamada);
     return;
   }
 
@@ -345,6 +478,15 @@ function tentarProximoMotorista(idChamada, motivo = "proxima_tentativa") {
   if (!motoristaAtualizado) {
     console.log("Motorista saiu antes da tentativa:", motorista.nome);
     tentarProximoMotorista(idChamada, "motorista_offline");
+    return;
+  }
+
+  if (motoristaAtualizado.statusOperacional !== "disponivel") {
+    console.log("Motorista não está disponível para tentativa:", {
+      nome: motoristaAtualizado.nome,
+      statusOperacional: motoristaAtualizado.statusOperacional,
+    });
+    tentarProximoMotorista(idChamada, "motorista_indisponivel");
     return;
   }
 
@@ -364,6 +506,7 @@ function tentarProximoMotorista(idChamada, motivo = "proxima_tentativa") {
   chamada.tempo = tempo;
 
   chamadas.set(idChamada, chamada);
+  marcarMotoristaTocando(motorista.socketId, idChamada);
 
   if (chamada.passageiroSocketId) {
     io.to(chamada.passageiroSocketId).emit("status_chamada", {
@@ -426,6 +569,7 @@ function tentarProximoMotorista(idChamada, motivo = "proxima_tentativa") {
   chamadas.set(idChamada, chamada);
 }
 
+
 io.on("connection", (socket) => {
   console.log("Novo dispositivo conectado:", socket.id);
 
@@ -464,6 +608,8 @@ io.on("connection", (socket) => {
       latitude: dados.latitude,
       longitude: dados.longitude,
       online: true,
+      statusOperacional: "disponivel",
+      chamadaAtualId: null,
       modoLocalizacao: "economico",
       atualizadoEm: new Date(),
       tokenSessao,
@@ -533,7 +679,7 @@ io.on("connection", (socket) => {
     if (motoristasOrdenados.length === 0) {
       socket.emit("status_chamada", {
         status: "sem_motoristas",
-        mensagem: "Nenhum mototaxista online no momento.",
+        mensagem: "Nenhum mototaxista disponível no momento.",
       });
 
       return;
@@ -632,6 +778,7 @@ io.on("connection", (socket) => {
     };
 
     chamadas.set(dados.idChamada, chamada);
+    marcarMotoristaOcupado(socket.id, dados.idChamada);
 
     const dadosAceite = {
       ...dados,
@@ -696,6 +843,8 @@ io.on("connection", (socket) => {
       endereco: chamada.endereco,
     };
 
+    marcarMotoristaDisponivel(socket.id);
+
     io.emit("chamada_recusada", dadosRecusa);
 
     if (chamada.passageiroSocketId) {
@@ -742,6 +891,8 @@ io.on("connection", (socket) => {
       nomeMotorista: chamada.motoristaAceitou.nomeMotorista || motoristaLogado?.nome,
       endereco: chamada.endereco,
     };
+
+    marcarMotoristaDisponivel(chamada.motoristaAceitou.socketId);
 
     io.emit("corrida_finalizada", dadosFinalizacao);
 
@@ -840,6 +991,8 @@ io.on("connection", (socket) => {
         dadosCancelamento
       );
     }
+
+    marcarMotoristaDisponivel(chamada.motoristaAceitou.socketId);
 
     chamadas.delete(dados.idChamada);
 
@@ -1046,6 +1199,90 @@ app.post("/auth/login-motorista", async (req, res) => {
   });
 });
 
+
+app.post("/admin/despacho-rapido", async (req, res) => {
+  const { secret, cliente, endereco, observacao } = req.body;
+
+  if (!validarAdminSecret(secret)) {
+    return res.status(401).json({
+      ok: false,
+      mensagem: "Senha administrativa inválida.",
+    });
+  }
+
+  const enderecoDigitado = String(endereco || "").trim();
+
+  if (!enderecoDigitado) {
+    return res.status(400).json({
+      ok: false,
+      mensagem: "Informe o endereço de embarque.",
+    });
+  }
+
+  const coordenadas = await obterCoordenadasPorEndereco(enderecoDigitado);
+
+  if (!coordenadas) {
+    return res.status(400).json({
+      ok: false,
+      mensagem: "Não foi possível encontrar esse endereço. Tente informar rua, número, bairro e cidade.",
+    });
+  }
+
+  const motoristasOrdenados = listarMotoristasPorProximidade(
+    coordenadas.latitude,
+    coordenadas.longitude
+  );
+
+  if (motoristasOrdenados.length === 0) {
+    return res.status(400).json({
+      ok: false,
+      mensagem: "Nenhum mototaxista disponível no momento.",
+    });
+  }
+
+  const idChamada = Date.now().toString();
+
+  const chamada = {
+    idChamada,
+    cliente: String(cliente || "").trim() || "Passageiro do despacho rápido",
+    endereco: coordenadas.enderecoFormatado || enderecoDigitado,
+    observacao: String(observacao || "").trim() || "Despacho rápido pela central",
+    latitudePassageiro: coordenadas.latitude,
+    longitudePassageiro: coordenadas.longitude,
+    origem: "Despacho rápido",
+    passageiroSocketId: null,
+    motoristasOrdenados,
+    indiceAtual: -1,
+    status: "criada",
+    timeoutId: null,
+    criadoPorAdmin: true,
+    enderecoDigitado,
+  };
+
+  chamadas.set(idChamada, chamada);
+
+  tentarProximoMotorista(idChamada, "despacho_rapido_admin");
+
+  return res.json({
+    ok: true,
+    mensagem: `Despacho criado. Tentando ${motoristasOrdenados[0].nome}.`,
+    idChamada,
+    endereco: chamada.endereco,
+    coordenadas: {
+      latitude: coordenadas.latitude,
+      longitude: coordenadas.longitude,
+    },
+    motoristasDisponiveis: motoristasOrdenados.length,
+    primeiroMotorista: {
+      idMotorista: motoristasOrdenados[0].idMotorista,
+      nome: motoristasOrdenados[0].nome,
+      distancia: formatarDistancia(motoristasOrdenados[0].distanciaMetros),
+      tempo: estimarTempo(motoristasOrdenados[0].distanciaMetros),
+    },
+  });
+});
+
+
 app.post("/despachar-motorista", (req, res) => {
   const { socketId, cliente, endereco, distancia, tempo, origem } = req.body;
 
@@ -1069,6 +1306,13 @@ app.post("/despachar-motorista", (req, res) => {
     return res.status(404).json({
       ok: false,
       mensagem: "Motorista não está mais online.",
+    });
+  }
+
+  if (motorista.statusOperacional !== "disponivel") {
+    return res.status(400).json({
+      ok: false,
+      mensagem: `Motorista não está disponível no momento. Status: ${motorista.statusOperacional}.`,
     });
   }
 
@@ -1098,6 +1342,7 @@ app.post("/despachar-motorista", (req, res) => {
   };
 
   chamadas.set(idChamada, chamada);
+  marcarMotoristaTocando(socketId, idChamada);
 
   io.to(socketId).emit("nova_chamada", chamada);
 
