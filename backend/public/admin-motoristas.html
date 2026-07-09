@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Motoristas - Cornélio Move</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #111827;
+      color: #f9fafb;
+      padding: 24px;
+    }
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    h1, h2 { text-align: center; }
+    .card {
+      background: #1f2937;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    }
+    label {
+      display: block;
+      color: #cbd5e1;
+      font-size: 14px;
+      margin-bottom: 6px;
+      margin-top: 12px;
+    }
+    input, select {
+      width: 100%;
+      background: #111827;
+      color: #ffffff;
+      border: 1px solid #374151;
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 16px;
+    }
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 14px;
+      font-size: 15px;
+    }
+    .btn-primary { background: #22c55e; color: #111827; }
+    .btn-secondary { background: #2563eb; color: #ffffff; }
+    .btn-danger { background: #dc2626; color: #ffffff; }
+    .row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .status {
+      margin-top: 12px;
+      font-weight: bold;
+      text-align: center;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      overflow: hidden;
+      border-radius: 12px;
+    }
+    th, td {
+      border-bottom: 1px solid #374151;
+      padding: 10px;
+      text-align: left;
+    }
+    th { color: #94a3b8; }
+    .ativo { color: #22c55e; font-weight: bold; }
+    .inativo { color: #ef4444; font-weight: bold; }
+    .hint {
+      color: #94a3b8;
+      font-size: 13px;
+      line-height: 1.4;
+      margin-top: 8px;
+    }
+    @media (max-width: 700px) {
+      .row { grid-template-columns: 1fr; }
+      body { padding: 12px; }
+      table { font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Cornélio Move</h1>
+    <h2>Cadastro de Motoristas</h2>
+
+    <div class="card">
+      <label>Senha administrativa da central</label>
+      <input id="adminSecret" type="password" placeholder="Senha da central" />
+      <button class="btn-secondary" onclick="carregarMotoristas()">Carregar motoristas</button>
+      <p class="hint">Essa senha é a variável ADMIN_SECRET configurada no .env do backend.</p>
+      <div id="status" class="status"></div>
+    </div>
+
+    <div class="card">
+      <h2>Criar / atualizar motorista</h2>
+      <div class="row">
+        <div>
+          <label>Login numérico</label>
+          <input id="login" maxlength="3" inputmode="numeric" placeholder="Ex: 41" />
+        </div>
+        <div>
+          <label>Nome</label>
+          <input id="nome" placeholder="Ex: Fábio" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Senha</label>
+          <input id="senha" type="password" placeholder="Obrigatória ao criar; opcional ao atualizar" />
+        </div>
+        <div>
+          <label>Status</label>
+          <select id="ativo">
+            <option value="true">Ativo</option>
+            <option value="false">Inativo</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="btn-primary" onclick="salvarMotorista()">Salvar motorista</button>
+      <p class="hint">Se o login já existir, o cadastro será atualizado. Para manter a senha antiga, deixe o campo senha vazio.</p>
+    </div>
+
+    <div class="card">
+      <h2>Motoristas cadastrados</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Login</th>
+            <th>Nome</th>
+            <th>Status</th>
+            <th>Ação</th>
+          </tr>
+        </thead>
+        <tbody id="listaMotoristas"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    function setStatus(mensagem, erro = false) {
+      const el = document.getElementById('status');
+      el.textContent = mensagem;
+      el.style.color = erro ? '#ef4444' : '#22c55e';
+    }
+
+    function getSecret() {
+      return document.getElementById('adminSecret').value;
+    }
+
+    async function carregarMotoristas() {
+      const secret = getSecret();
+
+      if (!secret) {
+        setStatus('Informe a senha administrativa.', true);
+        return;
+      }
+
+      try {
+        const resposta = await fetch(`/admin/motoristas?secret=${encodeURIComponent(secret)}`);
+        const dados = await resposta.json();
+
+        if (!resposta.ok || !dados.ok) {
+          setStatus(dados.mensagem || 'Erro ao carregar motoristas.', true);
+          return;
+        }
+
+        const tbody = document.getElementById('listaMotoristas');
+        tbody.innerHTML = '';
+
+        dados.motoristas.forEach((motorista) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${motorista.login}</td>
+            <td>${motorista.nome}</td>
+            <td class="${motorista.ativo ? 'ativo' : 'inativo'}">${motorista.ativo ? 'Ativo' : 'Inativo'}</td>
+            <td><button class="btn-secondary" onclick='preencherFormulario(${JSON.stringify(motorista)})'>Editar</button></td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        setStatus('Motoristas carregados.');
+      } catch (error) {
+        setStatus('Erro de conexão com o backend.', true);
+      }
+    }
+
+    function preencherFormulario(motorista) {
+      document.getElementById('login').value = motorista.login;
+      document.getElementById('nome').value = motorista.nome;
+      document.getElementById('senha').value = '';
+      document.getElementById('ativo').value = motorista.ativo ? 'true' : 'false';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    async function salvarMotorista() {
+      const secret = getSecret();
+      const login = document.getElementById('login').value.trim();
+      const nome = document.getElementById('nome').value.trim();
+      const senha = document.getElementById('senha').value;
+      const ativo = document.getElementById('ativo').value === 'true';
+
+      if (!secret) {
+        setStatus('Informe a senha administrativa.', true);
+        return;
+      }
+
+      if (!/^\d{1,3}$/.test(login)) {
+        setStatus('Login deve ter apenas números e entre 1 e 3 dígitos.', true);
+        return;
+      }
+
+      if (!nome) {
+        setStatus('Informe o nome do motorista.', true);
+        return;
+      }
+
+      try {
+        const resposta = await fetch('/admin/motoristas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secret, login, nome, senha, ativo }),
+        });
+
+        const dados = await resposta.json();
+
+        if (!resposta.ok || !dados.ok) {
+          setStatus(dados.mensagem || 'Erro ao salvar motorista.', true);
+          return;
+        }
+
+        setStatus(dados.mensagem || 'Motorista salvo.');
+        document.getElementById('senha').value = '';
+        await carregarMotoristas();
+      } catch (error) {
+        setStatus('Erro de conexão com o backend.', true);
+      }
+    }
+  </script>
+</body>
+</html>

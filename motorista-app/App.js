@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
+  Linking,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -26,10 +27,21 @@ export default function App() {
   const [corridaAceita, setCorridaAceita] = useState(false);
   const [modoLocalizacao, setModoLocalizacao] = useState("economico");
 
-  const [idMotorista, setIdMotorista] = useState("41");
-  const [nomeMotorista, setNomeMotorista] = useState("Motorista Teste 41");
+  const [login, setLogin] = useState("");
+  const [senha, setSenha] = useState("");
+  const [entrando, setEntrando] = useState(false);
+  const [motoristaLogado, setMotoristaLogado] = useState(null);
+  const [tokenSessao, setTokenSessao] = useState(null);
 
   useEffect(() => {
+    if (!BACKEND_URL) {
+      Alert.alert(
+        "Configuração incompleta",
+        "Configure EXPO_PUBLIC_BACKEND_URL no arquivo .env do app motorista."
+      );
+      return;
+    }
+
     socketRef.current = io(BACKEND_URL, {
       transports: ["websocket"],
       reconnection: true,
@@ -43,6 +55,11 @@ export default function App() {
     socketRef.current.on("disconnect", () => {
       setConectado(false);
       console.log("Desconectado do backend");
+    });
+
+    socketRef.current.on("auth_erro", async (dados) => {
+      Alert.alert("Sessão inválida", dados.mensagem || "Faça login novamente.");
+      await sairDaConta(true);
     });
 
     socketRef.current.on("nova_chamada", (chamada) => {
@@ -109,6 +126,80 @@ export default function App() {
       }
     };
   }, []);
+
+  async function entrarNaConta() {
+    const loginLimpo = login.trim();
+
+    if (!BACKEND_URL) {
+      Alert.alert("Configuração incompleta", "Servidor não configurado.");
+      return;
+    }
+
+    if (!/^\d{1,3}$/.test(loginLimpo)) {
+      Alert.alert("Login inválido", "Digite um login numérico de 1 a 3 dígitos.");
+      return;
+    }
+
+    if (!senha) {
+      Alert.alert("Senha obrigatória", "Digite sua senha.");
+      return;
+    }
+
+    try {
+      setEntrando(true);
+
+      const resposta = await fetch(`${BACKEND_URL}/auth/login-motorista`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          login: loginLimpo,
+          senha,
+        }),
+      });
+
+      const dados = await resposta.json();
+
+      if (!resposta.ok || !dados.ok) {
+        Alert.alert("Não foi possível entrar", dados.mensagem || "Login ou senha inválidos.");
+        return;
+      }
+
+      setMotoristaLogado(dados.motorista);
+      setTokenSessao(dados.tokenSessao);
+      setSenha("");
+    } catch (error) {
+      Alert.alert(
+        "Erro de conexão",
+        "Não foi possível conectar ao servidor para fazer login."
+      );
+    } finally {
+      setEntrando(false);
+    }
+  }
+
+  async function sairDaConta(forcar = false) {
+    if (online && !forcar) {
+      Alert.alert("Atenção", "Fique offline antes de sair da conta.");
+      return;
+    }
+
+    if (socketRef.current) {
+      socketRef.current.emit("motorista_offline");
+    }
+
+    await pararMonitoramentoLocalizacao();
+
+    setOnline(false);
+    setLocalizacao(null);
+    setChamadaAtual(null);
+    setCorridaAceita(false);
+    setModoLocalizacao("economico");
+    setMotoristaLogado(null);
+    setTokenSessao(null);
+    setSenha("");
+  }
 
   async function pegarLocalizacao() {
     try {
@@ -186,18 +277,13 @@ export default function App() {
   }
 
   async function ficarOnlineOffline() {
+    if (!motoristaLogado || !tokenSessao) {
+      Alert.alert("Login obrigatório", "Entre na sua conta antes de ficar online.");
+      return;
+    }
+
     if (!conectado) {
       Alert.alert("Sem conexão", "O app ainda não conectou ao backend.");
-      return;
-    }
-
-    if (!idMotorista.trim()) {
-      Alert.alert("Atenção", "Digite o número/login do motorista.");
-      return;
-    }
-
-    if (!nomeMotorista.trim()) {
-      Alert.alert("Atenção", "Digite o nome do motorista.");
       return;
     }
 
@@ -206,16 +292,28 @@ export default function App() {
 
       if (!coords) return;
 
-      socketRef.current.emit("motorista_online", {
-        idMotorista: idMotorista.trim(),
-        nome: nomeMotorista.trim(),
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-      });
+      socketRef.current.emit(
+        "motorista_online",
+        {
+          tokenSessao,
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+        },
+        async (resposta) => {
+          if (!resposta || !resposta.ok) {
+            Alert.alert(
+              "Não foi possível ficar online",
+              resposta?.mensagem || "Faça login novamente."
+            );
+            await pararMonitoramentoLocalizacao();
+            setCarregando(false);
+            return;
+          }
 
-      await iniciarMonitoramentoLocalizacao("economico");
-
-      setOnline(true);
+          await iniciarMonitoramentoLocalizacao("economico");
+          setOnline(true);
+        }
+      );
     } else {
       socketRef.current.emit("motorista_offline");
 
@@ -230,15 +328,15 @@ export default function App() {
   }
 
   async function aceitarChamada() {
-    if (!chamadaAtual) return;
+    if (!chamadaAtual || !motoristaLogado) return;
 
     socketRef.current.emit(
       "aceitar_chamada",
       {
         idChamada: chamadaAtual.idChamada,
         tokenTentativa: chamadaAtual.tokenTentativa,
-        idMotorista: idMotorista.trim(),
-        nomeMotorista: nomeMotorista.trim(),
+        idMotorista: motoristaLogado.login,
+        nomeMotorista: motoristaLogado.nome,
         endereco: chamadaAtual.endereco,
       },
       async (resposta) => {
@@ -266,13 +364,13 @@ export default function App() {
   }
 
   function recusarChamada() {
-    if (!chamadaAtual) return;
+    if (!chamadaAtual || !motoristaLogado) return;
 
     socketRef.current.emit("recusar_chamada", {
       idChamada: chamadaAtual.idChamada,
       tokenTentativa: chamadaAtual.tokenTentativa,
-      idMotorista: idMotorista.trim(),
-      nomeMotorista: nomeMotorista.trim(),
+      idMotorista: motoristaLogado.login,
+      nomeMotorista: motoristaLogado.nome,
       endereco: chamadaAtual.endereco,
     });
 
@@ -281,13 +379,13 @@ export default function App() {
   }
 
   async function executarFinalizarCorrida() {
-    if (!chamadaAtual) return;
+    if (!chamadaAtual || !motoristaLogado) return;
 
     socketRef.current.emit("finalizar_corrida", {
       idChamada: chamadaAtual.idChamada,
       tokenTentativa: chamadaAtual.tokenTentativa,
-      idMotorista: idMotorista.trim(),
-      nomeMotorista: nomeMotorista.trim(),
+      idMotorista: motoristaLogado.login,
+      nomeMotorista: motoristaLogado.nome,
       endereco: chamadaAtual.endereco,
     });
 
@@ -318,15 +416,15 @@ export default function App() {
   }
 
   async function executarCancelarCorrida() {
-    if (!chamadaAtual || !corridaAceita) return;
+    if (!chamadaAtual || !corridaAceita || !motoristaLogado) return;
 
     socketRef.current.emit(
       "cancelar_corrida",
       {
         idChamada: chamadaAtual.idChamada,
         tokenTentativa: chamadaAtual.tokenTentativa,
-        idMotorista: idMotorista.trim(),
-        nomeMotorista: nomeMotorista.trim(),
+        idMotorista: motoristaLogado.login,
+        nomeMotorista: motoristaLogado.nome,
         endereco: chamadaAtual.endereco,
         origemCancelamento: "motorista",
       },
@@ -369,6 +467,93 @@ export default function App() {
     );
   }
 
+  async function abrirNavegacao() {
+    if (!chamadaAtual) {
+      Alert.alert("Navegação", "Não há corrida aceita para abrir navegação.");
+      return;
+    }
+
+    const destinoLat = Number(chamadaAtual.latitudePassageiro);
+    const destinoLng = Number(chamadaAtual.longitudePassageiro);
+
+    if (!Number.isFinite(destinoLat) || !Number.isFinite(destinoLng)) {
+      Alert.alert(
+        "Navegação",
+        "Não foi possível encontrar a localização do cliente nesta chamada."
+      );
+      return;
+    }
+
+    const origemLat = Number(localizacao?.latitude);
+    const origemLng = Number(localizacao?.longitude);
+
+    const origem =
+      Number.isFinite(origemLat) && Number.isFinite(origemLng)
+        ? `&origin=${origemLat},${origemLng}`
+        : "";
+
+    const url = `https://www.google.com/maps/dir/?api=1${origem}&destination=${destinoLat},${destinoLng}&travelmode=driving`;
+
+    try {
+      await Linking.openURL(url);
+    } catch (error) {
+      Alert.alert(
+        "Erro ao abrir navegação",
+        "Não foi possível abrir o aplicativo de mapas neste celular."
+      );
+    }
+  }
+
+  if (!motoristaLogado) {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <StatusBar barStyle="light-content" />
+
+        <Text style={styles.titulo}>Cornélio Move</Text>
+        <Text style={styles.subtitulo}>Login do Mototaxista</Text>
+
+        <View style={styles.card}>
+          <Text style={styles.label}>Conexão com backend</Text>
+          <Text style={conectado ? styles.verdePequeno : styles.vermelhoPequeno}>
+            {conectado ? "CONECTADO" : "DESCONECTADO"}
+          </Text>
+          <Text style={styles.url}>Servidor Configurado</Text>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.label}>Entre com seu login e senha</Text>
+
+          <TextInput
+            style={styles.input}
+            placeholder="Login do motorista"
+            placeholderTextColor="#9ca3af"
+            value={login}
+            onChangeText={setLogin}
+            keyboardType="numeric"
+            maxLength={3}
+          />
+
+          <TextInput
+            style={styles.input}
+            placeholder="Senha"
+            placeholderTextColor="#9ca3af"
+            value={senha}
+            onChangeText={setSenha}
+            secureTextEntry
+          />
+
+          <TouchableOpacity
+            style={styles.botaoVerde}
+            onPress={entrarNaConta}
+            disabled={entrando}
+          >
+            <Text style={styles.textoBotao}>{entrando ? "Entrando..." : "Entrar"}</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -385,26 +570,14 @@ export default function App() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.label}>Identificação do motorista</Text>
+        <Text style={styles.label}>Conta do motorista</Text>
+        <Text style={styles.contaTexto}>
+          {motoristaLogado.login} - {motoristaLogado.nome}
+        </Text>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Número/Login do motorista"
-          placeholderTextColor="#9ca3af"
-          value={idMotorista}
-          onChangeText={setIdMotorista}
-          editable={!online}
-          keyboardType="numeric"
-        />
-
-        <TextInput
-          style={styles.input}
-          placeholder="Nome do motorista"
-          placeholderTextColor="#9ca3af"
-          value={nomeMotorista}
-          onChangeText={setNomeMotorista}
-          editable={!online}
-        />
+        <TouchableOpacity style={styles.botaoCinza} onPress={() => sairDaConta(false)}>
+          <Text style={styles.textoBotao}>Sair da conta</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.card}>
@@ -486,10 +659,7 @@ export default function App() {
           <Text style={styles.info}>Vá até:</Text>
           <Text style={styles.endereco}>{chamadaAtual.endereco}</Text>
 
-          <TouchableOpacity
-            style={styles.botaoAzul}
-            onPress={() => Alert.alert("Navegação", "Depois vamos abrir Google Maps/Waze aqui.")}
-          >
+          <TouchableOpacity style={styles.botaoAzul} onPress={abrirNavegacao}>
             <Text style={styles.textoBotao}>Abrir navegação</Text>
           </TouchableOpacity>
 
@@ -543,7 +713,15 @@ const styles = StyleSheet.create({
     padding: 14,
     borderRadius: 10,
     marginTop: 10,
+    marginBottom: 10,
     fontSize: 16,
+  },
+  contaTexto: {
+    color: "#ffffff",
+    fontSize: 22,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 14,
   },
   verdeGrande: {
     color: "#22c55e",
@@ -587,6 +765,11 @@ const styles = StyleSheet.create({
   botaoVermelho: {
     backgroundColor: "#ef4444",
     padding: 16,
+    borderRadius: 12,
+  },
+  botaoCinza: {
+    backgroundColor: "#4b5563",
+    padding: 14,
     borderRadius: 12,
   },
   textoBotao: {

@@ -1,8 +1,15 @@
+const dns = require("node:dns");
+dns.setDefaultResultOrder("ipv4first");
+
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
 
 const app = express();
 
@@ -20,16 +27,81 @@ const io = new Server(server, {
 
 const motoristas = new Map();
 const chamadas = new Map();
+const sessoesMotoristas = new Map();
 
 const TEMPO_RESPOSTA_MOTORISTA_MS = 15000;
 
 const GEOAPIFY_API_KEY = process.env.GEOAPIFY_API_KEY || "";
 const GEOAPIFY_DAILY_LIMIT = Number(process.env.GEOAPIFY_DAILY_LIMIT || 2500);
+const ADMIN_SECRET = process.env.ADMIN_SECRET || "";
+
+const DATA_DIR = path.join(__dirname, "data");
+const MOTORISTAS_DB_PATH = path.join(DATA_DIR, "motoristas.json");
 
 const geoapifyUso = {
   dia: null,
   consultas: 0,
 };
+
+function garantirBancoMotoristas() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+
+  if (!fs.existsSync(MOTORISTAS_DB_PATH)) {
+    fs.writeFileSync(MOTORISTAS_DB_PATH, JSON.stringify({ motoristas: [] }, null, 2));
+  }
+}
+
+function carregarBancoMotoristas() {
+  garantirBancoMotoristas();
+
+  try {
+    const conteudo = fs.readFileSync(MOTORISTAS_DB_PATH, "utf8");
+    const dados = JSON.parse(conteudo);
+
+    if (!Array.isArray(dados.motoristas)) {
+      return { motoristas: [] };
+    }
+
+    return dados;
+  } catch (error) {
+    console.log("Erro ao carregar banco de motoristas:", error.message);
+    return { motoristas: [] };
+  }
+}
+
+function salvarBancoMotoristas(dados) {
+  garantirBancoMotoristas();
+  fs.writeFileSync(MOTORISTAS_DB_PATH, JSON.stringify(dados, null, 2));
+}
+
+function validarLoginMotorista(login) {
+  return /^\d{1,3}$/.test(String(login || "").trim());
+}
+
+function limparMotoristaParaResposta(motorista) {
+  return {
+    login: motorista.login,
+    nome: motorista.nome,
+    ativo: Boolean(motorista.ativo),
+    criadoEm: motorista.criadoEm,
+    atualizadoEm: motorista.atualizadoEm,
+  };
+}
+
+function buscarMotoristaPorLogin(login) {
+  const banco = carregarBancoMotoristas();
+  return banco.motoristas.find((motorista) => motorista.login === String(login).trim()) || null;
+}
+
+function validarAdminSecret(valor) {
+  if (!ADMIN_SECRET) {
+    return false;
+  }
+
+  return String(valor || "") === ADMIN_SECRET;
+}
 
 function obterDiaAtualBrasil() {
   return new Intl.DateTimeFormat("pt-BR", {
@@ -156,7 +228,6 @@ async function obterEnderecoPorCoordenadas(latitude, longitude) {
     return null;
   }
 }
-
 
 function enviarListaMotoristas() {
   io.emit("lista_motoristas", Array.from(motoristas.values()));
@@ -358,20 +429,61 @@ function tentarProximoMotorista(idChamada, motivo = "proxima_tentativa") {
 io.on("connection", (socket) => {
   console.log("Novo dispositivo conectado:", socket.id);
 
-  socket.on("motorista_online", (dados) => {
+  socket.on("motorista_online", (dados, callback) => {
+    const tokenSessao = String(dados.tokenSessao || "");
+    const sessao = sessoesMotoristas.get(tokenSessao);
+
+    if (!sessao) {
+      const resposta = {
+        ok: false,
+        mensagem: "Faça login novamente para ficar online.",
+      };
+
+      socket.emit("auth_erro", resposta);
+      if (callback) callback(resposta);
+      return;
+    }
+
+    const motoristaConta = buscarMotoristaPorLogin(sessao.login);
+
+    if (!motoristaConta || !motoristaConta.ativo) {
+      const resposta = {
+        ok: false,
+        mensagem: "Conta de motorista inativa ou não encontrada.",
+      };
+
+      socket.emit("auth_erro", resposta);
+      if (callback) callback(resposta);
+      return;
+    }
+
     motoristas.set(socket.id, {
       socketId: socket.id,
-      idMotorista: dados.idMotorista,
-      nome: dados.nome,
+      idMotorista: motoristaConta.login,
+      nome: motoristaConta.nome,
       latitude: dados.latitude,
       longitude: dados.longitude,
       online: true,
       modoLocalizacao: "economico",
       atualizadoEm: new Date(),
+      tokenSessao,
     });
 
-    console.log("Motorista online:", dados);
+    console.log("Motorista online:", {
+      login: motoristaConta.login,
+      nome: motoristaConta.nome,
+    });
     enviarListaMotoristas();
+
+    if (callback) {
+      callback({
+        ok: true,
+        motorista: {
+          login: motoristaConta.login,
+          nome: motoristaConta.nome,
+        },
+      });
+    }
   });
 
   socket.on("atualizar_localizacao", (dados) => {
@@ -454,81 +566,106 @@ io.on("connection", (socket) => {
   });
 
   socket.on("aceitar_chamada", (dados, callback) => {
-  console.log("Tentativa de aceite:", dados);
+    console.log("Tentativa de aceite:", dados);
 
-  const chamada = chamadas.get(dados.idChamada);
+    const motoristaLogado = motoristas.get(socket.id);
 
-  if (!chamada) {
-    const resposta = {
-      ok: false,
-      mensagem: "Essa chamada não está mais disponível.",
+    if (!motoristaLogado) {
+      const resposta = {
+        ok: false,
+        mensagem: "Faça login e fique online novamente para aceitar chamadas.",
+      };
+
+      socket.emit("chamada_indisponivel", {
+        idChamada: dados.idChamada,
+        mensagem: resposta.mensagem,
+      });
+
+      if (callback) callback(resposta);
+      return;
+    }
+
+    const chamada = chamadas.get(dados.idChamada);
+
+    if (!chamada) {
+      const resposta = {
+        ok: false,
+        mensagem: "Essa chamada não está mais disponível.",
+      };
+
+      socket.emit("chamada_indisponivel", {
+        idChamada: dados.idChamada,
+        mensagem: resposta.mensagem,
+      });
+
+      if (callback) callback(resposta);
+      return;
+    }
+
+    if (
+      chamada.status !== "tentando_motorista" ||
+      !chamada.motoristaAtual ||
+      chamada.motoristaAtual.socketId !== socket.id ||
+      chamada.tokenTentativa !== dados.tokenTentativa
+    ) {
+      const resposta = {
+        ok: false,
+        mensagem: "Essa chamada já foi enviada para outro mototaxista.",
+      };
+
+      socket.emit("chamada_indisponivel", {
+        idChamada: dados.idChamada,
+        mensagem: resposta.mensagem,
+      });
+
+      if (callback) callback(resposta);
+      return;
+    }
+
+    limparTimeoutChamada(chamada);
+
+    chamada.status = "aceita";
+    chamada.motoristaAceitou = {
+      socketId: socket.id,
+      idMotorista: motoristaLogado.idMotorista,
+      nomeMotorista: motoristaLogado.nome,
     };
 
-    socket.emit("chamada_indisponivel", {
-      idChamada: dados.idChamada,
-      mensagem: resposta.mensagem,
-    });
+    chamadas.set(dados.idChamada, chamada);
 
-    if (callback) callback(resposta);
-    return;
-  }
-
-  if (
-    chamada.status !== "tentando_motorista" ||
-    !chamada.motoristaAtual ||
-    chamada.motoristaAtual.socketId !== socket.id ||
-    chamada.tokenTentativa !== dados.tokenTentativa
-  ) {
-    const resposta = {
-      ok: false,
-      mensagem: "Essa chamada já foi enviada para outro mototaxista.",
+    const dadosAceite = {
+      ...dados,
+      idMotorista: motoristaLogado.idMotorista,
+      nomeMotorista: motoristaLogado.nome,
+      endereco: chamada.endereco,
     };
 
-    socket.emit("chamada_indisponivel", {
-      idChamada: dados.idChamada,
-      mensagem: resposta.mensagem,
-    });
+    console.log("Chamada aceita:", dadosAceite);
 
-    if (callback) callback(resposta);
-    return;
-  }
+    io.emit("chamada_aceita", dadosAceite);
 
-  limparTimeoutChamada(chamada);
+    if (chamada.passageiroSocketId) {
+      io.to(chamada.passageiroSocketId).emit("chamada_aceita_passageiro", {
+        idChamada: dados.idChamada,
+        nomeMotorista: motoristaLogado.nome,
+        idMotorista: motoristaLogado.idMotorista,
+        endereco: chamada.endereco,
+        mensagem: `${motoristaLogado.nome} aceitou sua chamada.`,
+      });
+    }
 
-  chamada.status = "aceita";
-  chamada.motoristaAceitou = {
-    socketId: socket.id,
-    idMotorista: dados.idMotorista,
-    nomeMotorista: dados.nomeMotorista,
-  };
-
-  chamadas.set(dados.idChamada, chamada);
-
-  console.log("Chamada aceita:", dados);
-
-  io.emit("chamada_aceita", dados);
-
-  if (chamada.passageiroSocketId) {
-    io.to(chamada.passageiroSocketId).emit("chamada_aceita_passageiro", {
-      idChamada: dados.idChamada,
-      nomeMotorista: dados.nomeMotorista,
-      idMotorista: dados.idMotorista,
-      endereco: dados.endereco,
-      mensagem: `${dados.nomeMotorista} aceitou sua chamada.`,
-    });
-  }
-
-  if (callback) {
-    callback({
-      ok: true,
-      mensagem: "Chamada aceita com sucesso.",
-    });
-  }
-});
+    if (callback) {
+      callback({
+        ok: true,
+        mensagem: "Chamada aceita com sucesso.",
+      });
+    }
+  });
 
   socket.on("recusar_chamada", (dados) => {
     console.log("Chamada recusada:", dados);
 
+    const motoristaLogado = motoristas.get(socket.id);
     const chamada = chamadas.get(dados.idChamada);
 
     if (!chamada) {
@@ -552,12 +689,19 @@ io.on("connection", (socket) => {
       return;
     }
 
-    io.emit("chamada_recusada", dados);
+    const dadosRecusa = {
+      ...dados,
+      idMotorista: motoristaLogado?.idMotorista || dados.idMotorista,
+      nomeMotorista: motoristaLogado?.nome || dados.nomeMotorista,
+      endereco: chamada.endereco,
+    };
+
+    io.emit("chamada_recusada", dadosRecusa);
 
     if (chamada.passageiroSocketId) {
       io.to(chamada.passageiroSocketId).emit("status_chamada", {
         status: "recusada",
-        mensagem: `${dados.nomeMotorista} recusou. Tentando outro mototaxista...`,
+        mensagem: `${dadosRecusa.nomeMotorista} recusou. Tentando outro mototaxista...`,
       });
     }
 
@@ -567,6 +711,7 @@ io.on("connection", (socket) => {
   socket.on("finalizar_corrida", (dados) => {
     console.log("Corrida finalizada:", dados);
 
+    const motoristaLogado = motoristas.get(socket.id);
     const chamada = chamadas.get(dados.idChamada);
 
     if (!chamada) {
@@ -591,12 +736,19 @@ io.on("connection", (socket) => {
 
     limparTimeoutChamada(chamada);
 
-    io.emit("corrida_finalizada", dados);
+    const dadosFinalizacao = {
+      ...dados,
+      idMotorista: chamada.motoristaAceitou.idMotorista,
+      nomeMotorista: chamada.motoristaAceitou.nomeMotorista || motoristaLogado?.nome,
+      endereco: chamada.endereco,
+    };
+
+    io.emit("corrida_finalizada", dadosFinalizacao);
 
     if (chamada.passageiroSocketId) {
       io.to(chamada.passageiroSocketId).emit("corrida_finalizada_passageiro", {
         idChamada: dados.idChamada,
-        nomeMotorista: dados.nomeMotorista,
+        nomeMotorista: dadosFinalizacao.nomeMotorista,
         mensagem: "Corrida finalizada.",
       });
     }
@@ -733,6 +885,167 @@ app.get("/geoapify-uso", (req, res) => {
   });
 });
 
+app.get("/admin/motoristas", (req, res) => {
+  const secret = req.query.secret;
+
+  if (!validarAdminSecret(secret)) {
+    return res.status(401).json({
+      ok: false,
+      mensagem: "Senha administrativa inválida.",
+    });
+  }
+
+  const banco = carregarBancoMotoristas();
+
+  res.json({
+    ok: true,
+    motoristas: banco.motoristas.map(limparMotoristaParaResposta),
+  });
+});
+
+app.post("/admin/motoristas", async (req, res) => {
+  const { secret, login, nome, senha, ativo } = req.body;
+
+  if (!validarAdminSecret(secret)) {
+    return res.status(401).json({
+      ok: false,
+      mensagem: "Senha administrativa inválida.",
+    });
+  }
+
+  const loginLimpo = String(login || "").trim();
+  const nomeLimpo = String(nome || "").trim();
+  const senhaLimpa = String(senha || "");
+
+  if (!validarLoginMotorista(loginLimpo)) {
+    return res.status(400).json({
+      ok: false,
+      mensagem: "O login deve ter apenas números e entre 1 e 3 dígitos.",
+    });
+  }
+
+  if (!nomeLimpo) {
+    return res.status(400).json({
+      ok: false,
+      mensagem: "Informe o nome do motorista.",
+    });
+  }
+
+  const banco = carregarBancoMotoristas();
+  const indiceExistente = banco.motoristas.findIndex(
+    (motorista) => motorista.login === loginLimpo
+  );
+
+  const agora = new Date().toISOString();
+
+  if (indiceExistente >= 0) {
+    const motoristaAtual = banco.motoristas[indiceExistente];
+
+    motoristaAtual.nome = nomeLimpo;
+    motoristaAtual.ativo = ativo !== false;
+    motoristaAtual.atualizadoEm = agora;
+
+    if (senhaLimpa) {
+      if (senhaLimpa.length < 4) {
+        return res.status(400).json({
+          ok: false,
+          mensagem: "A senha deve ter pelo menos 4 caracteres.",
+        });
+      }
+
+      motoristaAtual.senhaHash = await bcrypt.hash(senhaLimpa, 10);
+    }
+
+    banco.motoristas[indiceExistente] = motoristaAtual;
+    salvarBancoMotoristas(banco);
+
+    return res.json({
+      ok: true,
+      mensagem: "Motorista atualizado com sucesso.",
+      motorista: limparMotoristaParaResposta(motoristaAtual),
+    });
+  }
+
+  if (senhaLimpa.length < 4) {
+    return res.status(400).json({
+      ok: false,
+      mensagem: "Para criar motorista, informe uma senha com pelo menos 4 caracteres.",
+    });
+  }
+
+  const novoMotorista = {
+    login: loginLimpo,
+    nome: nomeLimpo,
+    senhaHash: await bcrypt.hash(senhaLimpa, 10),
+    ativo: ativo !== false,
+    criadoEm: agora,
+    atualizadoEm: agora,
+  };
+
+  banco.motoristas.push(novoMotorista);
+  salvarBancoMotoristas(banco);
+
+  return res.json({
+    ok: true,
+    mensagem: "Motorista criado com sucesso.",
+    motorista: limparMotoristaParaResposta(novoMotorista),
+  });
+});
+
+app.post("/auth/login-motorista", async (req, res) => {
+  const login = String(req.body.login || "").trim();
+  const senha = String(req.body.senha || "");
+
+  if (!validarLoginMotorista(login)) {
+    return res.status(400).json({
+      ok: false,
+      mensagem: "Login inválido.",
+    });
+  }
+
+  if (!senha) {
+    return res.status(400).json({
+      ok: false,
+      mensagem: "Informe a senha.",
+    });
+  }
+
+  const motorista = buscarMotoristaPorLogin(login);
+
+  if (!motorista || !motorista.ativo) {
+    return res.status(401).json({
+      ok: false,
+      mensagem: "Login ou senha inválidos.",
+    });
+  }
+
+  const senhaCorreta = await bcrypt.compare(senha, motorista.senhaHash);
+
+  if (!senhaCorreta) {
+    return res.status(401).json({
+      ok: false,
+      mensagem: "Login ou senha inválidos.",
+    });
+  }
+
+  const tokenSessao = crypto.randomBytes(32).toString("hex");
+
+  sessoesMotoristas.set(tokenSessao, {
+    login: motorista.login,
+    nome: motorista.nome,
+    criadoEm: new Date(),
+  });
+
+  return res.json({
+    ok: true,
+    tokenSessao,
+    motorista: {
+      login: motorista.login,
+      nome: motorista.nome,
+    },
+  });
+});
+
 app.post("/despachar-motorista", (req, res) => {
   const { socketId, cliente, endereco, distancia, tempo, origem } = req.body;
 
@@ -798,6 +1111,8 @@ app.post("/despachar-motorista", (req, res) => {
 });
 
 const PORTA = 3001;
+
+garantirBancoMotoristas();
 
 server.listen(PORTA, () => {
   console.log(`Backend Cornélio Move rodando na porta ${PORTA}`);
