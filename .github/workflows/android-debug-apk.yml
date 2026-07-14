@@ -7,6 +7,10 @@ jobs:
   build-android:
     runs-on: ubuntu-latest
 
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
     defaults:
       run:
         working-directory: motorista-app
@@ -36,6 +40,24 @@ jobs:
           CI: 1
           EXPO_PUBLIC_BACKEND_URL: http://207.180.245.177:3001
         run: npx expo prebuild --platform android --clean
+
+      - name: Install Android NDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          for attempt in 1 2 3; do
+            echo "Tentativa $attempt de instalar NDK 27.1.12297006"
+            rm -rf "$ANDROID_HOME/ndk/27.1.12297006"
+            rm -rf "$ANDROID_HOME/.temp"
+            if "$SDKMANAGER" "ndk;27.1.12297006"; then
+              echo "NDK instalado com sucesso"
+              exit 0
+            fi
+            echo "Falhou, tentando novamente em 10s..."
+            sleep 10
+          done
+          echo "Falha ao instalar NDK depois de 3 tentativas"
+          exit 1
 
       - name: Build release APK
         env:
