@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "777098388714",
+    "project_id": "cornelio-move",
+    "storage_bucket": "cornelio-move.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:777098388714:android:6372e6a3b538ed1a3ea393",
+        "android_client_info": {
+          "package_name": "com.corneliomove.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyANFqcpd73Agwo5mbClavGFpFHGvU-pU8Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:777098388714:android:da005313c77d33c83ea393",
+        "android_client_info": {
+          "package_name": "com.corneliomove.motorista"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyANFqcpd73Agwo5mbClavGFpFHGvU-pU8Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:777098388714:android:795c9a69d5d86a313ea393",
+        "android_client_info": {
+          "package_name": "com.mycompany.corneliomove"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyANFqcpd73Agwo5mbClavGFpFHGvU-pU8Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

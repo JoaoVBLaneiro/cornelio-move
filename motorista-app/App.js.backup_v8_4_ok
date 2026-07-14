@@ -801,7 +801,7 @@ export default function App() {
         <StatusBar barStyle="light-content" />
 
         <Text style={styles.titulo}>Cornélio Move</Text>
-        <Text style={styles.subtitulo}>Login do Mototaxista - V8.5</Text>
+        <Text style={styles.subtitulo}>Login do Mototaxista - V8.4</Text>
 
         <View style={styles.conexaoLinha}>
           <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
@@ -845,11 +845,11 @@ export default function App() {
   }
 
   return (
-    <ScrollView contentContainerStyle={[styles.container, chamadaAtual && !corridaAceita ? styles.containerChamadaAtiva : null]}>
+    <ScrollView contentContainerStyle={styles.container}>
       <StatusBar barStyle="light-content" />
 
       <Text style={styles.titulo}>Cornélio Move</Text>
-      <Text style={styles.subtitulo}>App do Mototaxista - V8.5</Text>
+      <Text style={styles.subtitulo}>App do Mototaxista - V8.4</Text>
 
       <View style={styles.conexaoLinha}>
         <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
@@ -858,66 +858,37 @@ export default function App() {
         </Text>
       </View>
 
-      {chamadaAtual && !corridaAceita && (
-        <View style={styles.cardChamadaPrioritaria}>
-          <Text style={styles.chamadaTitulo}>Nova chamada</Text>
+      <View style={styles.cardStatus}>
+        <Text style={styles.label}>Status do motorista</Text>
 
-          <Text style={styles.info}>Cliente: {chamadaAtual.cliente}</Text>
-          <Text style={styles.enderecoChamada}>{chamadaAtual.endereco}</Text>
-          <View style={styles.linhaResumoChamada}>
-            <Text style={styles.resumoChamada}>{chamadaAtual.distancia}</Text>
-            <Text style={styles.resumoChamada}>{chamadaAtual.tempo}</Text>
-          </View>
+        <Text style={online ? styles.verdeGrande : styles.vermelhoGrande}>
+          {online ? "ONLINE" : "OFFLINE"}
+        </Text>
 
-          {chamadaAtual.observacao && (
-            <Text style={styles.info}>Obs: {chamadaAtual.observacao}</Text>
-          )}
-
-          <View style={styles.linhaBotoesChamada}>
-            <TouchableOpacity style={styles.botaoRecusarGrande} onPress={recusarChamada}>
-              <Text style={styles.textoBotaoGrande}>Recusar</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.botaoAceitarGrande} onPress={aceitarChamada}>
-              <Text style={styles.textoBotaoGrande}>Aceitar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {(!chamadaAtual || corridaAceita) && (
-        <View style={styles.cardStatus}>
-          <Text style={styles.label}>Status do motorista</Text>
-
-          <Text style={online ? styles.verdeGrande : styles.vermelhoGrande}>
-            {online ? "ONLINE" : "OFFLINE"}
+        <TouchableOpacity
+          style={online ? styles.botaoVermelho : styles.botaoVerde}
+          onPress={ficarOnlineOffline}
+          disabled={carregando}
+        >
+          <Text style={styles.textoBotao}>
+            {carregando ? "Buscando GPS..." : online ? "Ficar Offline" : "Ficar Online"}
           </Text>
+        </TouchableOpacity>
 
-          <TouchableOpacity
-            style={online ? styles.botaoVermelho : styles.botaoVerde}
-            onPress={ficarOnlineOffline}
-            disabled={carregando}
-          >
-            <Text style={styles.textoBotao}>
-              {carregando ? "Buscando GPS..." : online ? "Ficar Offline" : "Ficar Online"}
+        {online && (
+          <Text style={styles.modoTexto}>
+            GPS: {modoLocalizacao === "alta_precisao" ? "Alta precisão" : "Econômico"}
+          </Text>
+        )}
+
+        {localizacao && (
+          <View style={styles.caixaLocalizacaoCompacta}>
+            <Text style={styles.localizacaoTexto}>
+              Precisão GPS: {Math.round(localizacao.accuracy)} m
             </Text>
-          </TouchableOpacity>
-
-          {online && (
-            <Text style={styles.modoTexto}>
-              GPS: {modoLocalizacao === "alta_precisao" ? "Alta precisão" : "Econômico"}
-            </Text>
-          )}
-
-          {localizacao && (
-            <View style={styles.caixaLocalizacaoCompacta}>
-              <Text style={styles.localizacaoTexto}>
-                Precisão GPS: {Math.round(localizacao.accuracy)} m
-              </Text>
-            </View>
-          )}
-        </View>
-      )}
+          </View>
+        )}
+      </View>
 
       {!chamadaAtual && (
         <View style={styles.cardAguardando}>
@@ -925,6 +896,32 @@ export default function App() {
           <Text style={styles.aguardandoTexto}>
             Quando o painel despachar uma corrida, ela aparecerá aqui.
           </Text>
+        </View>
+      )}
+
+      {chamadaAtual && !corridaAceita && (
+        <View style={styles.cardChamada}>
+          <Text style={styles.chamadaTitulo}>Nova chamada</Text>
+
+          <Text style={styles.info}>Cliente: {chamadaAtual.cliente}</Text>
+          <Text style={styles.info}>Embarque: {chamadaAtual.endereco}</Text>
+          <Text style={styles.info}>Distância: {chamadaAtual.distancia}</Text>
+          <Text style={styles.info}>Tempo: {chamadaAtual.tempo}</Text>
+          <Text style={styles.info}>Origem: {chamadaAtual.origem}</Text>
+
+          {chamadaAtual.observacao && (
+            <Text style={styles.info}>Obs: {chamadaAtual.observacao}</Text>
+          )}
+
+          <View style={styles.linhaBotoes}>
+            <TouchableOpacity style={styles.botaoRecusar} onPress={recusarChamada}>
+              <Text style={styles.textoBotao}>Recusar</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.botaoAceitar} onPress={aceitarChamada}>
+              <Text style={styles.textoBotao}>Aceitar</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -966,29 +963,26 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     backgroundColor: "#111827",
     padding: 18,
-    paddingTop: 34,
+    paddingTop: 42,
     justifyContent: "flex-start",
-  },
-  containerChamadaAtiva: {
-    paddingTop: 24,
   },
   titulo: {
     color: "#fff",
-    fontSize: 28,
+    fontSize: 30,
     fontWeight: "bold",
     textAlign: "center",
   },
   subtitulo: {
     color: "#cbd5e1",
-    fontSize: 14,
+    fontSize: 15,
     textAlign: "center",
-    marginBottom: 8,
+    marginBottom: 10,
   },
   conexaoLinha: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 10,
+    marginBottom: 16,
   },
   bolinhaConexao: {
     width: 11,
@@ -1143,55 +1137,6 @@ const styles = StyleSheet.create({
     color: "#cbd5e1",
     textAlign: "center",
     marginTop: 8,
-  },
-  cardChamadaPrioritaria: {
-    backgroundColor: "#facc15",
-    borderRadius: 18,
-    padding: 18,
-    marginTop: 4,
-    marginBottom: 14,
-  },
-  enderecoChamada: {
-    color: "#111827",
-    fontSize: 19,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 10,
-  },
-  linhaResumoChamada: {
-    flexDirection: "row",
-    justifyContent: "center",
-    marginBottom: 8,
-  },
-  resumoChamada: {
-    color: "#111827",
-    fontSize: 16,
-    fontWeight: "bold",
-    marginHorizontal: 10,
-  },
-  linhaBotoesChamada: {
-    flexDirection: "row",
-    marginTop: 12,
-  },
-  botaoAceitarGrande: {
-    backgroundColor: "#16a34a",
-    paddingVertical: 18,
-    borderRadius: 14,
-    flex: 1,
-    marginLeft: 7,
-  },
-  botaoRecusarGrande: {
-    backgroundColor: "#dc2626",
-    paddingVertical: 18,
-    borderRadius: 14,
-    flex: 1,
-    marginRight: 7,
-  },
-  textoBotaoGrande: {
-    color: "#fff",
-    textAlign: "center",
-    fontWeight: "bold",
-    fontSize: 18,
   },
   cardChamada: {
     backgroundColor: "#facc15",

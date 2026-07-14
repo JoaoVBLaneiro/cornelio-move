@@ -31,4 +31,7 @@ Thumbs.db
 # VS Code local
 .vscode/
 
-backend/data/
+backend/data/motorista-app/fcm-service-account.json
+motorista-app/App.js.backup_*
+motorista-app/patch-v82.js
+motorista-app/fix-appjson.js

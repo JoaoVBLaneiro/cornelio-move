@@ -1,4 +1,4 @@
- import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Linking,
@@ -304,6 +304,7 @@ export default function App() {
     socketRef.current.on("nova_chamada", (chamada) => {
       setChamadaAtual(chamada);
       setCorridaAceita(false);
+      Alert.alert("Nova chamada", chamada.endereco);
     });
 
     socketRef.current.on("cancelar_chamada", (dados) => {
@@ -801,13 +802,14 @@ export default function App() {
         <StatusBar barStyle="light-content" />
 
         <Text style={styles.titulo}>Cornélio Move</Text>
-        <Text style={styles.subtitulo}>Login do Mototaxista - V8.5</Text>
+        <Text style={styles.subtitulo}>Login do Mototaxista - V8.2 DIAG PUSH</Text>
 
-        <View style={styles.conexaoLinha}>
-          <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
-          <Text style={styles.conexaoTexto}>
-            {conectado ? "Backend conectado" : "Backend desconectado"}
+        <View style={styles.card}>
+          <Text style={styles.label}>Conexão com backend</Text>
+          <Text style={conectado ? styles.verdePequeno : styles.vermelhoPequeno}>
+            {conectado ? "CONECTADO" : "DESCONECTADO"}
           </Text>
+          <Text style={styles.url}>Servidor Configurado</Text>
         </View>
 
         <View style={styles.card}>
@@ -845,86 +847,106 @@ export default function App() {
   }
 
   return (
-    <ScrollView contentContainerStyle={[styles.container, chamadaAtual && !corridaAceita ? styles.containerChamadaAtiva : null]}>
+    <ScrollView contentContainerStyle={styles.container}>
       <StatusBar barStyle="light-content" />
 
       <Text style={styles.titulo}>Cornélio Move</Text>
-      <Text style={styles.subtitulo}>App do Mototaxista - V8.5</Text>
+      <Text style={styles.subtitulo}>App do Mototaxista - V8.2 DIAG PUSH</Text>
 
-      <View style={styles.conexaoLinha}>
-        <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
-        <Text style={styles.conexaoTexto}>
-          {conectado ? "Backend conectado" : "Backend desconectado"}
+      <View style={styles.card}>
+        <Text style={styles.label}>Conexão com backend</Text>
+        <Text style={conectado ? styles.verdePequeno : styles.vermelhoPequeno}>
+          {conectado ? "CONECTADO" : "DESCONECTADO"}
         </Text>
+        <Text style={styles.url}>Servidor Configurado</Text>
       </View>
 
-      {chamadaAtual && !corridaAceita && (
-        <View style={styles.cardChamadaPrioritaria}>
-          <Text style={styles.chamadaTitulo}>Nova chamada</Text>
+      <View style={styles.card}>
+        <Text style={styles.label}>Notificações de corrida</Text>
+        <Text style={styles.url}>{statusPush}</Text>
+      </View>
 
-          <Text style={styles.info}>Cliente: {chamadaAtual.cliente}</Text>
-          <Text style={styles.enderecoChamada}>{chamadaAtual.endereco}</Text>
-          <View style={styles.linhaResumoChamada}>
-            <Text style={styles.resumoChamada}>{chamadaAtual.distancia}</Text>
-            <Text style={styles.resumoChamada}>{chamadaAtual.tempo}</Text>
-          </View>
+      <View style={styles.card}>
+        <Text style={styles.label}>Conta do motorista</Text>
+        <Text style={styles.contaTexto}>
+          {motoristaLogado.login} - {motoristaLogado.nome}
+        </Text>
 
-          {chamadaAtual.observacao && (
-            <Text style={styles.info}>Obs: {chamadaAtual.observacao}</Text>
-          )}
+        <TouchableOpacity style={styles.botaoCinza} onPress={() => sairDaConta(false)}>
+          <Text style={styles.textoBotao}>Sair da conta</Text>
+        </TouchableOpacity>
+      </View>
 
-          <View style={styles.linhaBotoesChamada}>
-            <TouchableOpacity style={styles.botaoRecusarGrande} onPress={recusarChamada}>
-              <Text style={styles.textoBotaoGrande}>Recusar</Text>
-            </TouchableOpacity>
+      <View style={styles.card}>
+        <Text style={styles.label}>Status do motorista</Text>
 
-            <TouchableOpacity style={styles.botaoAceitarGrande} onPress={aceitarChamada}>
-              <Text style={styles.textoBotaoGrande}>Aceitar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
+        <Text style={online ? styles.verdeGrande : styles.vermelhoGrande}>
+          {online ? "ONLINE" : "OFFLINE"}
+        </Text>
 
-      {(!chamadaAtual || corridaAceita) && (
-        <View style={styles.cardStatus}>
-          <Text style={styles.label}>Status do motorista</Text>
-
-          <Text style={online ? styles.verdeGrande : styles.vermelhoGrande}>
-            {online ? "ONLINE" : "OFFLINE"}
+        <TouchableOpacity
+          style={online ? styles.botaoVermelho : styles.botaoVerde}
+          onPress={ficarOnlineOffline}
+          disabled={carregando}
+        >
+          <Text style={styles.textoBotao}>
+            {carregando ? "Buscando GPS..." : online ? "Ficar Offline" : "Ficar Online"}
           </Text>
+        </TouchableOpacity>
 
-          <TouchableOpacity
-            style={online ? styles.botaoVermelho : styles.botaoVerde}
-            onPress={ficarOnlineOffline}
-            disabled={carregando}
-          >
-            <Text style={styles.textoBotao}>
-              {carregando ? "Buscando GPS..." : online ? "Ficar Offline" : "Ficar Online"}
+        {online && (
+          <Text style={styles.modoTexto}>
+            Modo GPS: {modoLocalizacao === "alta_precisao" ? "Alta precisão" : "Econômico"}
+          </Text>
+        )}
+
+        {localizacao && (
+          <View style={styles.caixaLocalizacao}>
+            <Text style={styles.localizacaoTexto}>
+              Lat: {localizacao.latitude.toFixed(6)}
             </Text>
-          </TouchableOpacity>
-
-          {online && (
-            <Text style={styles.modoTexto}>
-              GPS: {modoLocalizacao === "alta_precisao" ? "Alta precisão" : "Econômico"}
+            <Text style={styles.localizacaoTexto}>
+              Lng: {localizacao.longitude.toFixed(6)}
             </Text>
-          )}
-
-          {localizacao && (
-            <View style={styles.caixaLocalizacaoCompacta}>
-              <Text style={styles.localizacaoTexto}>
-                Precisão GPS: {Math.round(localizacao.accuracy)} m
-              </Text>
-            </View>
-          )}
-        </View>
-      )}
+            <Text style={styles.localizacaoTexto}>
+              Precisão: {Math.round(localizacao.accuracy)} m
+            </Text>
+          </View>
+        )}
+      </View>
 
       {!chamadaAtual && (
         <View style={styles.cardAguardando}>
           <Text style={styles.aguardandoTitulo}>Aguardando chamada</Text>
           <Text style={styles.aguardandoTexto}>
-            Quando o painel despachar uma corrida, ela aparecerá aqui.
+            Quando o painel ou passageiro despachar uma corrida, ela aparecerá aqui.
           </Text>
+        </View>
+      )}
+
+      {chamadaAtual && !corridaAceita && (
+        <View style={styles.cardChamada}>
+          <Text style={styles.chamadaTitulo}>Nova chamada</Text>
+
+          <Text style={styles.info}>Cliente: {chamadaAtual.cliente}</Text>
+          <Text style={styles.info}>Embarque: {chamadaAtual.endereco}</Text>
+          <Text style={styles.info}>Distância: {chamadaAtual.distancia}</Text>
+          <Text style={styles.info}>Tempo: {chamadaAtual.tempo}</Text>
+          <Text style={styles.info}>Origem: {chamadaAtual.origem}</Text>
+
+          {chamadaAtual.observacao && (
+            <Text style={styles.info}>Obs: {chamadaAtual.observacao}</Text>
+          )}
+
+          <View style={styles.linhaBotoes}>
+            <TouchableOpacity style={styles.botaoAceitar} onPress={aceitarChamada}>
+              <Text style={styles.textoBotao}>Aceitar</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.botaoRecusar} onPress={recusarChamada}>
+              <Text style={styles.textoBotao}>Recusar</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -947,83 +969,33 @@ export default function App() {
           </TouchableOpacity>
         </View>
       )}
-
-      <View style={styles.cardConta}>
-        <Text style={styles.label}>Conta do motorista</Text>
-        <Text style={styles.contaTexto}>
-          {motoristaLogado.login} - {motoristaLogado.nome}
-        </Text>
-
-        <TouchableOpacity style={styles.botaoCinza} onPress={() => sairDaConta(false)}>
-          <Text style={styles.textoBotao}>Sair da conta</Text>
-        </TouchableOpacity>
-      </View>
     </ScrollView>
   );
 }
+
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
     backgroundColor: "#111827",
-    padding: 18,
-    paddingTop: 34,
-    justifyContent: "flex-start",
-  },
-  containerChamadaAtiva: {
-    paddingTop: 24,
+    padding: 20,
+    justifyContent: "center",
   },
   titulo: {
     color: "#fff",
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: "bold",
     textAlign: "center",
   },
   subtitulo: {
     color: "#cbd5e1",
-    fontSize: 14,
+    fontSize: 16,
     textAlign: "center",
-    marginBottom: 8,
-  },
-  conexaoLinha: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 10,
-  },
-  bolinhaConexao: {
-    width: 11,
-    height: 11,
-    borderRadius: 999,
-    marginRight: 8,
-  },
-  bolinhaVerde: {
-    backgroundColor: "#22c55e",
-  },
-  bolinhaVermelha: {
-    backgroundColor: "#ef4444",
-  },
-  conexaoTexto: {
-    color: "#cbd5e1",
-    fontSize: 12,
-    fontWeight: "bold",
+    marginBottom: 24,
   },
   card: {
     backgroundColor: "#1f2937",
     borderRadius: 16,
     padding: 18,
-    marginBottom: 14,
-  },
-  cardStatus: {
-    backgroundColor: "#1f2937",
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 14,
-  },
-  cardConta: {
-    backgroundColor: "#1f2937",
-    borderRadius: 16,
-    padding: 18,
-    marginTop: 14,
     marginBottom: 16,
   },
   label: {
@@ -1043,7 +1015,7 @@ const styles = StyleSheet.create({
   },
   contaTexto: {
     color: "#ffffff",
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: "bold",
     textAlign: "center",
     marginBottom: 14,
@@ -1053,14 +1025,14 @@ const styles = StyleSheet.create({
     fontSize: 34,
     fontWeight: "bold",
     textAlign: "center",
-    marginVertical: 10,
+    marginVertical: 14,
   },
   vermelhoGrande: {
     color: "#ef4444",
     fontSize: 34,
     fontWeight: "bold",
     textAlign: "center",
-    marginVertical: 10,
+    marginVertical: 14,
   },
   verdePequeno: {
     color: "#22c55e",
@@ -1106,15 +1078,9 @@ const styles = StyleSheet.create({
   modoTexto: {
     color: "#facc15",
     textAlign: "center",
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "bold",
-    marginTop: 12,
-  },
-  caixaLocalizacaoCompacta: {
-    backgroundColor: "#111827",
-    borderRadius: 12,
-    padding: 10,
-    marginTop: 12,
+    marginTop: 14,
   },
   caixaLocalizacao: {
     backgroundColor: "#111827",
@@ -1131,7 +1097,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#374151",
     borderRadius: 16,
     padding: 20,
-    marginBottom: 14,
   },
   aguardandoTitulo: {
     color: "#fff",
@@ -1144,66 +1109,15 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 8,
   },
-  cardChamadaPrioritaria: {
-    backgroundColor: "#facc15",
-    borderRadius: 18,
-    padding: 18,
-    marginTop: 4,
-    marginBottom: 14,
-  },
-  enderecoChamada: {
-    color: "#111827",
-    fontSize: 19,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 10,
-  },
-  linhaResumoChamada: {
-    flexDirection: "row",
-    justifyContent: "center",
-    marginBottom: 8,
-  },
-  resumoChamada: {
-    color: "#111827",
-    fontSize: 16,
-    fontWeight: "bold",
-    marginHorizontal: 10,
-  },
-  linhaBotoesChamada: {
-    flexDirection: "row",
-    marginTop: 12,
-  },
-  botaoAceitarGrande: {
-    backgroundColor: "#16a34a",
-    paddingVertical: 18,
-    borderRadius: 14,
-    flex: 1,
-    marginLeft: 7,
-  },
-  botaoRecusarGrande: {
-    backgroundColor: "#dc2626",
-    paddingVertical: 18,
-    borderRadius: 14,
-    flex: 1,
-    marginRight: 7,
-  },
-  textoBotaoGrande: {
-    color: "#fff",
-    textAlign: "center",
-    fontWeight: "bold",
-    fontSize: 18,
-  },
   cardChamada: {
     backgroundColor: "#facc15",
     borderRadius: 16,
     padding: 20,
-    marginBottom: 14,
   },
   cardAceita: {
     backgroundColor: "#e5e7eb",
     borderRadius: 16,
     padding: 20,
-    marginBottom: 14,
   },
   chamadaTitulo: {
     color: "#111827",
@@ -1230,17 +1144,17 @@ const styles = StyleSheet.create({
   },
   botaoAceitar: {
     backgroundColor: "#16a34a",
-    padding: 18,
-    borderRadius: 12,
-    flex: 1,
-    marginLeft: 6,
-  },
-  botaoRecusar: {
-    backgroundColor: "#dc2626",
-    padding: 18,
+    padding: 16,
     borderRadius: 12,
     flex: 1,
     marginRight: 6,
+  },
+  botaoRecusar: {
+    backgroundColor: "#dc2626",
+    padding: 16,
+    borderRadius: 12,
+    flex: 1,
+    marginLeft: 6,
   },
   botaoAzul: {
     backgroundColor: "#2563eb",
@@ -1259,4 +1173,4 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
   },
-});
+}); 
