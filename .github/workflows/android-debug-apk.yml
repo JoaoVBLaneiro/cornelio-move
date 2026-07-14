@@ -1,4 +1,4 @@
-name: Android Debug APK
+name: Android Release APK
 
 on:
   workflow_dispatch:
@@ -37,13 +37,13 @@ jobs:
           EXPO_PUBLIC_BACKEND_URL: http://207.180.245.177:3001
         run: npx expo prebuild --platform android --clean
 
-      - name: Build debug APK
+      - name: Build release APK
         env:
           EXPO_PUBLIC_BACKEND_URL: http://207.180.245.177:3001
-        run: cd android && ./gradlew assembleDebug
+        run: cd android && ./gradlew assembleRelease
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CornelioMoveMotorista-v9-debug-apk
-          path: motorista-app/android/app/build/outputs/apk/debug/app-debug.apk
+          name: CornelioMoveMotorista-v9-release-apk
+          path: motorista-app/android/app/build/outputs/apk/release/app-release.apk
