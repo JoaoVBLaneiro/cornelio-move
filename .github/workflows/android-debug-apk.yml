@@ -33,8 +33,9 @@ jobs:
 
       - name: Prebuild Android
         env:
+          CI: 1
           EXPO_PUBLIC_BACKEND_URL: http://207.180.245.177:3001
-        run: npx expo prebuild --platform android --clean --non-interactive
+        run: npx expo prebuild --platform android --clean
 
       - name: Build debug APK
         env:
