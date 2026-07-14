@@ -1,4 +1,4 @@
- import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Linking,
@@ -14,11 +14,14 @@ import {
 import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
+import notifee, { EventType, AndroidImportance, AndroidCategory, AndroidVisibility } from "@notifee/react-native";
+import messaging from "@react-native-firebase/messaging";
 import { io } from "socket.io-client";
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 const CATEGORIA_CORRIDA = "corrida";
 const CANAL_CORRIDAS = "corridas";
+const CANAL_CORRIDAS_URGENTES = "corridas-urgentes";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -38,6 +41,7 @@ export default function App() {
   const tokenSessaoRef = useRef(null);
   const restaurandoOnlineRef = useRef(false);
   const expoPushTokenRef = useRef(null);
+  const fcmTokenRef = useRef(null);
 
   const [conectado, setConectado] = useState(false);
   const [online, setOnline] = useState(false);
@@ -53,6 +57,7 @@ export default function App() {
   const [motoristaLogado, setMotoristaLogado] = useState(null);
   const [tokenSessao, setTokenSessao] = useState(null);
   const [statusPush, setStatusPush] = useState("Configurando notificações...");
+  const [statusFcm, setStatusFcm] = useState("Preparando chamada em tela cheia...");
 
   async function configurarNotificacoesPush() {
     try {
@@ -120,6 +125,124 @@ export default function App() {
       console.log("Erro ao configurar push notification:", error.message);
       return null;
     }
+  }
+
+
+  async function configurarCanalCorridasUrgentes() {
+    if (Platform.OS !== "android") {
+      return;
+    }
+
+    await notifee.createChannel({
+      id: CANAL_CORRIDAS_URGENTES,
+      name: "Corridas urgentes",
+      importance: AndroidImportance.HIGH,
+      sound: "default",
+      vibration: true,
+      vibrationPattern: [0, 800, 250, 800, 250, 800],
+      lights: true,
+      lightColor: "#facc15",
+    });
+  }
+
+  async function configurarFcmDireto() {
+    try {
+      await configurarCanalCorridasUrgentes();
+      await notifee.requestPermission();
+
+      const authStatus = await messaging().requestPermission();
+      const autorizado =
+        authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+        authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+
+      if (!autorizado && Platform.OS !== "android") {
+        fcmTokenRef.current = null;
+        setStatusFcm("FCM não autorizado");
+        return null;
+      }
+
+      const token = await messaging().getToken();
+
+      fcmTokenRef.current = token;
+      setStatusFcm("Tela cheia preparada");
+      console.log("FCM token motorista:", token);
+
+      return token;
+    } catch (error) {
+      fcmTokenRef.current = null;
+      setStatusFcm("Erro FCM: " + error.message);
+      console.log("Erro ao configurar FCM direto:", error.message);
+      return null;
+    }
+  }
+
+  function obterChamadaDeDadosNativos(dados = {}) {
+    const bruto = dados?.chamada;
+
+    if (typeof bruto === "string") {
+      try {
+        return JSON.parse(bruto);
+      } catch (error) {
+        console.log("Falha ao interpretar chamada nativa:", error.message);
+      }
+    }
+
+    if (bruto && typeof bruto === "object") {
+      return bruto;
+    }
+
+    if (dados?.idChamada) {
+      return {
+        idChamada: dados.idChamada,
+        cliente: dados.cliente || "Cliente",
+        endereco: dados.endereco || "Endereço não informado",
+        observacao: dados.observacao || "",
+        latitudePassageiro: dados.latitudePassageiro,
+        longitudePassageiro: dados.longitudePassageiro,
+        distancia: dados.distancia || "Distância a calcular",
+        tempo: dados.tempo || "Tempo a calcular",
+        origem: dados.origem || "Despacho",
+        tokenTentativa: dados.tokenTentativa,
+      };
+    }
+
+    return null;
+  }
+
+  async function tratarChamadaNativa(dados = {}, actionId = "default") {
+    const chamada = obterChamadaDeDadosNativos(dados);
+
+    if (!chamada) {
+      return;
+    }
+
+    try {
+      const notificationId =
+        dados.notificacaoId ||
+        dados.notificationId ||
+        `corrida-${chamada.idChamada || "atual"}-${chamada.tokenTentativa || "tentativa"}`;
+
+      await notifee.cancelNotification(notificationId);
+    } catch (error) {
+      console.log("Não foi possível remover notificação da corrida:", error.message);
+    }
+
+    if (actionId === "ACEITAR_CORRIDA") {
+      setChamadaAtual(chamada);
+      setCorridaAceita(false);
+      await aceitarChamadaObjeto(chamada);
+      return;
+    }
+
+    if (actionId === "RECUSAR_CORRIDA") {
+      setChamadaAtual(chamada);
+      setCorridaAceita(false);
+      recusarChamadaObjeto(chamada);
+      return;
+    }
+
+    setChamadaAtual(chamada);
+    setCorridaAceita(false);
   }
 
   function obterChamadaDaNotificacao(response) {
@@ -207,6 +330,7 @@ export default function App() {
 
   useEffect(() => {
     configurarNotificacoesPush();
+    configurarFcmDireto();
 
     const respostaInicial = Notifications.getLastNotificationResponse();
     if (respostaInicial) {
@@ -214,13 +338,55 @@ export default function App() {
       Notifications.clearLastNotificationResponse();
     }
 
+    notifee.getInitialNotification().then((initialNotification) => {
+      if (initialNotification?.notification?.data) {
+        tratarChamadaNativa(
+          initialNotification.notification.data,
+          initialNotification.pressAction?.id || "default"
+        );
+      }
+    }).catch((error) => {
+      console.log("Erro ao verificar notificação inicial:", error.message);
+    });
+
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
       tratarRespostaNotificacao(response);
       Notifications.clearLastNotificationResponse();
     });
 
+    const unsubscribeNotifee = notifee.onForegroundEvent(({ type, detail }) => {
+      if (type === EventType.PRESS || type === EventType.ACTION_PRESS) {
+        tratarChamadaNativa(
+          detail.notification?.data || {},
+          detail.pressAction?.id || "default"
+        );
+      }
+    });
+
+    const unsubscribeFcmForeground = messaging().onMessage(async (remoteMessage) => {
+      const dados = remoteMessage?.data || {};
+
+      if (dados.tipo === "nova_corrida_motorista") {
+        await tratarChamadaNativa(dados, "default");
+      }
+    });
+
+    const unsubscribeToken = messaging().onTokenRefresh((novoToken) => {
+      fcmTokenRef.current = novoToken;
+      setStatusFcm("Tela cheia preparada");
+
+      if (socketRef.current && socketRef.current.connected) {
+        socketRef.current.emit("atualizar_fcm_token", {
+          fcmToken: novoToken,
+        });
+      }
+    });
+
     return () => {
       subscription.remove();
+      unsubscribeNotifee();
+      unsubscribeFcmForeground();
+      unsubscribeToken();
     };
   }, []);
 
@@ -547,6 +713,10 @@ export default function App() {
         await configurarNotificacoesPush();
       }
 
+      if (!fcmTokenRef.current) {
+        await configurarFcmDireto();
+      }
+
       const coords = await pegarLocalizacao();
 
       if (!coords) {
@@ -560,6 +730,7 @@ export default function App() {
           latitude: coords.latitude,
           longitude: coords.longitude,
           expoPushToken: expoPushTokenRef.current,
+          fcmToken: fcmTokenRef.current,
         },
         async (resposta) => {
           if (!resposta || !resposta.ok) {
@@ -608,6 +779,10 @@ export default function App() {
         await configurarNotificacoesPush();
       }
 
+      if (!fcmTokenRef.current) {
+        await configurarFcmDireto();
+      }
+
       const coords = await pegarLocalizacao();
 
       if (!coords) {
@@ -622,6 +797,7 @@ export default function App() {
           latitude: coords.latitude,
           longitude: coords.longitude,
           expoPushToken: expoPushTokenRef.current,
+          fcmToken: fcmTokenRef.current,
         },
         async (resposta) => {
           if (!resposta || !resposta.ok) {
@@ -801,7 +977,7 @@ export default function App() {
         <StatusBar barStyle="light-content" />
 
         <Text style={styles.titulo}>Cornélio Move</Text>
-        <Text style={styles.subtitulo}>Login do Mototaxista - V8.5</Text>
+        <Text style={styles.subtitulo}>Login do Mototaxista - V9.1</Text>
 
         <View style={styles.conexaoLinha}>
           <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
@@ -849,12 +1025,12 @@ export default function App() {
       <StatusBar barStyle="light-content" />
 
       <Text style={styles.titulo}>Cornélio Move</Text>
-      <Text style={styles.subtitulo}>App do Mototaxista - V8.5</Text>
+      <Text style={styles.subtitulo}>App do Mototaxista - V9.1</Text>
 
       <View style={styles.conexaoLinha}>
         <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
         <Text style={styles.conexaoTexto}>
-          {conectado ? "Backend conectado" : "Backend desconectado"}
+          {conectado ? "Backend conectado" : "Backend desconectado"} • {statusFcm}
         </Text>
       </View>
 

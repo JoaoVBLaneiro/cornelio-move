@@ -29,7 +29,6 @@ const motoristas = new Map();
 const chamadas = new Map();
 const sessoesMotoristas = new Map();
 const pushTokensMotoristas = new Map();
-const fcmTokensMotoristas = new Map();
 
 const TEMPO_RESPOSTA_MOTORISTA_MS = 15000;
 
@@ -372,195 +371,6 @@ async function enviarPushExpo(expoPushToken, titulo, corpo, dados = {}) {
   }
 }
 
-
-const FCM_SERVICE_ACCOUNT_FILE =
-  process.env.FCM_SERVICE_ACCOUNT_FILE || path.join(__dirname, "fcm-service-account.json");
-
-let fcmServiceAccountCache = null;
-let fcmAccessTokenCache = {
-  token: null,
-  expiraEm: 0,
-};
-
-function base64Url(input) {
-  return Buffer.from(input)
-    .toString("base64")
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
-}
-
-function carregarFcmServiceAccount() {
-  if (fcmServiceAccountCache) {
-    return fcmServiceAccountCache;
-  }
-
-  if (!fs.existsSync(FCM_SERVICE_ACCOUNT_FILE)) {
-    console.log("Arquivo FCM Service Account não encontrado:", FCM_SERVICE_ACCOUNT_FILE);
-    return null;
-  }
-
-  try {
-    fcmServiceAccountCache = JSON.parse(
-      fs.readFileSync(FCM_SERVICE_ACCOUNT_FILE, "utf8")
-    );
-
-    return fcmServiceAccountCache;
-  } catch (error) {
-    console.log("Falha ao ler FCM Service Account:", error.message);
-    return null;
-  }
-}
-
-async function obterAccessTokenFcm() {
-  const agora = Math.floor(Date.now() / 1000);
-
-  if (fcmAccessTokenCache.token && fcmAccessTokenCache.expiraEm > agora + 60) {
-    return fcmAccessTokenCache.token;
-  }
-
-  const conta = carregarFcmServiceAccount();
-
-  if (!conta || !conta.client_email || !conta.private_key || !conta.token_uri) {
-    console.log("Credenciais FCM incompletas.");
-    return null;
-  }
-
-  const header = {
-    alg: "RS256",
-    typ: "JWT",
-  };
-
-  const payload = {
-    iss: conta.client_email,
-    scope: "https://www.googleapis.com/auth/firebase.messaging",
-    aud: conta.token_uri,
-    iat: agora,
-    exp: agora + 3600,
-  };
-
-  const unsignedToken = `${base64Url(JSON.stringify(header))}.${base64Url(
-    JSON.stringify(payload)
-  )}`;
-
-  const assinatura = crypto
-    .createSign("RSA-SHA256")
-    .update(unsignedToken)
-    .sign(conta.private_key, "base64")
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
-
-  const jwt = `${unsignedToken}.${assinatura}`;
-
-  try {
-    const resposta = await fetch(conta.token_uri, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-        assertion: jwt,
-      }),
-    });
-
-    const dados = await resposta.json().catch(() => null);
-
-    if (!resposta.ok || !dados?.access_token) {
-      console.log("Falha ao obter access token FCM:", {
-        status: resposta.status,
-        dados,
-      });
-      return null;
-    }
-
-    fcmAccessTokenCache = {
-      token: dados.access_token,
-      expiraEm: agora + Number(dados.expires_in || 3600),
-    };
-
-    return fcmAccessTokenCache.token;
-  } catch (error) {
-    console.log("Erro ao obter access token FCM:", error.message);
-    return null;
-  }
-}
-
-async function enviarFcmCorrida(motorista, chamadaParaMotorista) {
-  const fcmToken = fcmTokensMotoristas.get(motorista.socketId);
-
-  if (!fcmToken) {
-    console.log("Motorista sem token FCM para chamada nativa:", motorista.nome);
-    return;
-  }
-
-  const conta = carregarFcmServiceAccount();
-
-  if (!conta?.project_id) {
-    console.log("FCM project_id não encontrado.");
-    return;
-  }
-
-  const accessToken = await obterAccessTokenFcm();
-
-  if (!accessToken) {
-    return;
-  }
-
-  const notificacaoId = `corrida-${chamadaParaMotorista.idChamada}-${chamadaParaMotorista.tokenTentativa}`;
-
-  const data = {
-    tipo: "nova_corrida_motorista",
-    idChamada: String(chamadaParaMotorista.idChamada || ""),
-    tokenTentativa: String(chamadaParaMotorista.tokenTentativa || ""),
-    cliente: String(chamadaParaMotorista.cliente || "Cliente"),
-    endereco: String(chamadaParaMotorista.endereco || ""),
-    observacao: String(chamadaParaMotorista.observacao || ""),
-    latitudePassageiro: String(chamadaParaMotorista.latitudePassageiro || ""),
-    longitudePassageiro: String(chamadaParaMotorista.longitudePassageiro || ""),
-    distancia: String(chamadaParaMotorista.distancia || ""),
-    tempo: String(chamadaParaMotorista.tempo || ""),
-    origem: String(chamadaParaMotorista.origem || "Despacho"),
-    notificacaoId,
-    chamada: JSON.stringify(chamadaParaMotorista),
-  };
-
-  try {
-    const resposta = await fetch(
-      `https://fcm.googleapis.com/v1/projects/${conta.project_id}/messages:send`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: {
-            token: fcmToken,
-            data,
-            android: {
-              priority: "HIGH",
-              ttl: "15s",
-            },
-          },
-        }),
-      }
-    );
-
-    const retorno = await resposta.json().catch(() => null);
-
-    console.log("FCM corrida enviado:", {
-      motorista: motorista.nome,
-      status: resposta.status,
-      retorno,
-    });
-  } catch (error) {
-    console.log("Falha ao enviar FCM corrida:", error.message);
-  }
-}
-
-
 function calcularDistanciaMetros(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const rad = Math.PI / 180;
@@ -777,7 +587,7 @@ function tentarProximoMotorista(idChamada, motivo = "proxima_tentativa") {
 
   io.to(motorista.socketId).emit("nova_chamada", chamadaParaMotorista);
 
-  enviarFcmCorrida(motorista, chamadaParaMotorista);
+
 
   console.log("Tentando motorista:", {
     idChamada,
@@ -868,14 +678,6 @@ io.on("connection", (socket) => {
       });
     }
 
-    if (dados.fcmToken) {
-      fcmTokensMotoristas.set(socket.id, String(dados.fcmToken));
-      console.log("Token FCM registrado para motorista:", {
-        login: motoristaConta.login,
-        nome: motoristaConta.nome,
-      });
-    }
-
     console.log("Motorista online:", {
       login: motoristaConta.login,
       nome: motoristaConta.nome,
@@ -918,21 +720,6 @@ io.on("connection", (socket) => {
     enviarListaMotoristas();
   });
 
-  socket.on("atualizar_fcm_token", (dados) => {
-    const motorista = motoristas.get(socket.id);
-
-    if (!motorista || !dados?.fcmToken) {
-      return;
-    }
-
-    fcmTokensMotoristas.set(socket.id, String(dados.fcmToken));
-
-    console.log("Token FCM atualizado para motorista:", {
-      login: motorista.idMotorista,
-      nome: motorista.nome,
-    });
-  });
-
   socket.on("motorista_offline", () => {
     const motorista = motoristas.get(socket.id);
 
@@ -942,7 +729,6 @@ io.on("connection", (socket) => {
 
     motoristas.delete(socket.id);
     pushTokensMotoristas.delete(socket.id);
-    fcmTokensMotoristas.delete(socket.id);
     enviarListaMotoristas();
   });
 
@@ -1293,7 +1079,6 @@ io.on("connection", (socket) => {
 
     motoristas.delete(socket.id);
     pushTokensMotoristas.delete(socket.id);
-    fcmTokensMotoristas.delete(socket.id);
     enviarListaMotoristas();
   });
 });
@@ -1706,7 +1491,7 @@ app.post("/despachar-motorista", (req, res) => {
 
   io.to(socketId).emit("nova_chamada", chamada);
 
-  enviarFcmCorrida(motorista, chamada);
+
 
   console.log("Chamada enviada para motorista específico:", chamada);
 
