@@ -35,3 +35,11 @@ backend/data/motorista-app/fcm-service-account.json
 motorista-app/App.js.backup_*
 motorista-app/patch-v82.js
 motorista-app/fix-appjson.js
+
+motorista-app/fcm-service-account.json
+
+motorista-app/fix-notifee-plugin.js
+
+motorista-app/patch-v9-appjson.js
+
+server-backend-atual-v9.js

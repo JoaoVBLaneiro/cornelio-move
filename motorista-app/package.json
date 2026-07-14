@@ -9,6 +9,9 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@notifee/react-native": "^9.1.8",
+    "@react-native-firebase/app": "^25.1.0",
+    "@react-native-firebase/messaging": "^25.1.0",
     "expo": "~54.0.34",
     "expo-build-properties": "~1.0.10",
     "expo-constants": "~18.0.13",
