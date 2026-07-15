@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Linking,
@@ -56,7 +56,7 @@ export default function App() {
   const [entrando, setEntrando] = useState(false);
   const [motoristaLogado, setMotoristaLogado] = useState(null);
   const [tokenSessao, setTokenSessao] = useState(null);
-  const [statusPush, setStatusPush] = useState("Configurando notificações...");
+  const [statusPush, setStatusPush] = useState("Configurando notificaÃ§Ãµes...");
   const [statusFcm, setStatusFcm] = useState("Preparando chamada em tela cheia...");
 
   async function configurarNotificacoesPush() {
@@ -65,7 +65,6 @@ export default function App() {
         await Notifications.setNotificationChannelAsync(CANAL_CORRIDAS, {
           name: "Corridas",
           importance: Notifications.AndroidImportance.MAX,
-          vibrationPattern: [0, 500, 250, 500, 250, 500],
           lightColor: "#22c55e",
           sound: "default",
           lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
@@ -100,7 +99,7 @@ export default function App() {
 
       if (statusFinal !== "granted") {
         expoPushTokenRef.current = null;
-        setStatusPush("Notificações bloqueadas no celular");
+        setStatusPush("NotificaÃ§Ãµes bloqueadas no celular");
         return null;
       }
 
@@ -110,13 +109,13 @@ export default function App() {
       if (!projectId) {
         expoPushTokenRef.current = null;
         setStatusPush("Sem projectId do EAS");
-        console.log("Project ID do EAS não encontrado no app.");
+        console.log("Project ID do EAS nÃ£o encontrado no app.");
         return null;
       }
 
       const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
       expoPushTokenRef.current = token;
-      setStatusPush("Notificações ativas");
+      setStatusPush("NotificaÃ§Ãµes ativas");
       console.log("ExpoPushToken motorista:", token);
       return token;
     } catch (error) {
@@ -139,7 +138,6 @@ export default function App() {
       importance: AndroidImportance.HIGH,
       sound: "default",
       vibration: true,
-      vibrationPattern: [0, 800, 250, 800, 250, 800],
       lights: true,
       lightColor: "#facc15",
     });
@@ -157,7 +155,7 @@ export default function App() {
 
       if (!autorizado && Platform.OS !== "android") {
         fcmTokenRef.current = null;
-        setStatusFcm("FCM não autorizado");
+        setStatusFcm("FCM nÃ£o autorizado");
         return null;
       }
 
@@ -195,11 +193,11 @@ export default function App() {
       return {
         idChamada: dados.idChamada,
         cliente: dados.cliente || "Cliente",
-        endereco: dados.endereco || "Endereço não informado",
+        endereco: dados.endereco || "EndereÃ§o nÃ£o informado",
         observacao: dados.observacao || "",
         latitudePassageiro: dados.latitudePassageiro,
         longitudePassageiro: dados.longitudePassageiro,
-        distancia: dados.distancia || "Distância a calcular",
+        distancia: dados.distancia || "DistÃ¢ncia a calcular",
         tempo: dados.tempo || "Tempo a calcular",
         origem: dados.origem || "Despacho",
         tokenTentativa: dados.tokenTentativa,
@@ -224,7 +222,7 @@ export default function App() {
 
       await notifee.cancelNotification(notificationId);
     } catch (error) {
-      console.log("Não foi possível remover notificação da corrida:", error.message);
+      console.log("NÃ£o foi possÃ­vel remover notificaÃ§Ã£o da corrida:", error.message);
     }
 
     if (actionId === "ACEITAR_CORRIDA") {
@@ -255,8 +253,8 @@ export default function App() {
 
     if (!chamada || !motoristaAtual || !socketRef.current || !socketRef.current.connected) {
       Alert.alert(
-        "Não foi possível aceitar",
-        "Abra o app, confirme a conexão e tente novamente."
+        "NÃ£o foi possÃ­vel aceitar",
+        "Abra o app, confirme a conexÃ£o e tente novamente."
       );
       return;
     }
@@ -276,8 +274,8 @@ export default function App() {
       async (resposta) => {
         if (!resposta || !resposta.ok) {
           Alert.alert(
-            "Chamada indisponível",
-            resposta?.mensagem || "Essa chamada não está mais disponível."
+            "Chamada indisponÃ­vel",
+            resposta?.mensagem || "Essa chamada nÃ£o estÃ¡ mais disponÃ­vel."
           );
 
           setChamadaAtual(null);
@@ -346,7 +344,7 @@ export default function App() {
         );
       }
     }).catch((error) => {
-      console.log("Erro ao verificar notificação inicial:", error.message);
+      console.log("Erro ao verificar notificaÃ§Ã£o inicial:", error.message);
     });
 
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
@@ -415,7 +413,7 @@ export default function App() {
   useEffect(() => {
     if (!BACKEND_URL) {
       Alert.alert(
-        "Configuração incompleta",
+        "ConfiguraÃ§Ã£o incompleta",
         "Configure EXPO_PUBLIC_BACKEND_URL no arquivo .env do app motorista."
       );
       return;
@@ -463,7 +461,7 @@ export default function App() {
     });
 
     socketRef.current.on("auth_erro", async (dados) => {
-      Alert.alert("Sessão inválida", dados.mensagem || "Faça login novamente.");
+      Alert.alert("SessÃ£o invÃ¡lida", dados.mensagem || "FaÃ§a login novamente.");
       await sairDaConta(true);
     });
 
@@ -494,7 +492,7 @@ export default function App() {
           chamadaAtualAnterior.idChamada === dados.idChamada
         ) {
           setCorridaAceita(false);
-          Alert.alert("Chamada indisponível", dados.mensagem);
+          Alert.alert("Chamada indisponÃ­vel", dados.mensagem);
           return null;
         }
 
@@ -535,17 +533,17 @@ export default function App() {
     const loginLimpo = login.trim();
 
     if (!BACKEND_URL) {
-      Alert.alert("Configuração incompleta", "Servidor não configurado.");
+      Alert.alert("ConfiguraÃ§Ã£o incompleta", "Servidor nÃ£o configurado.");
       return;
     }
 
     if (!/^\d{1,3}$/.test(loginLimpo)) {
-      Alert.alert("Login inválido", "Digite um login numérico de 1 a 3 dígitos.");
+      Alert.alert("Login invÃ¡lido", "Digite um login numÃ©rico de 1 a 3 dÃ­gitos.");
       return;
     }
 
     if (!senha) {
-      Alert.alert("Senha obrigatória", "Digite sua senha.");
+      Alert.alert("Senha obrigatÃ³ria", "Digite sua senha.");
       return;
     }
 
@@ -566,7 +564,7 @@ export default function App() {
       const dados = await resposta.json();
 
       if (!resposta.ok || !dados.ok) {
-        Alert.alert("Não foi possível entrar", dados.mensagem || "Login ou senha inválidos.");
+        Alert.alert("NÃ£o foi possÃ­vel entrar", dados.mensagem || "Login ou senha invÃ¡lidos.");
         return;
       }
 
@@ -578,7 +576,7 @@ export default function App() {
       setSenha("");
      } catch (error) {
   Alert.alert(
-    "Erro de conexão",
+    "Erro de conexÃ£o",
     `Servidor: ${BACKEND_URL}\nErro: ${error.message}`
   );
 }
@@ -591,7 +589,7 @@ export default function App() {
     desejaFicarOnlineRef.current = false;
 
     if (online && !forcar) {
-      Alert.alert("Atenção", "Fique offline antes de sair da conta.");
+      Alert.alert("AtenÃ§Ã£o", "Fique offline antes de sair da conta.");
       return;
     }
 
@@ -622,7 +620,7 @@ export default function App() {
       const { status } = await Location.requestForegroundPermissionsAsync();
 
       if (status !== "granted") {
-        Alert.alert("Permissão negada", "Não foi possível acessar a localização.");
+        Alert.alert("PermissÃ£o negada", "NÃ£o foi possÃ­vel acessar a localizaÃ§Ã£o.");
         setCarregando(false);
         return null;
       }
@@ -642,7 +640,7 @@ export default function App() {
       return coords;
     } catch (error) {
       setCarregando(false);
-      Alert.alert("Erro", "Erro ao pegar localização: " + error.message);
+      Alert.alert("Erro", "Erro ao pegar localizaÃ§Ã£o: " + error.message);
       return null;
     }
   }
@@ -739,8 +737,8 @@ export default function App() {
             setOnline(false);
 
             Alert.alert(
-              "Não foi possível reconectar",
-              resposta?.mensagem || "Faça login novamente."
+              "NÃ£o foi possÃ­vel reconectar",
+              resposta?.mensagem || "FaÃ§a login novamente."
             );
 
             await sairDaConta(true);
@@ -763,12 +761,12 @@ export default function App() {
 
   async function ficarOnlineOffline() {
     if (!motoristaLogado || !tokenSessao) {
-      Alert.alert("Login obrigatório", "Entre na sua conta antes de ficar online.");
+      Alert.alert("Login obrigatÃ³rio", "Entre na sua conta antes de ficar online.");
       return;
     }
 
     if (!conectado) {
-      Alert.alert("Sem conexão", "O app ainda não conectou ao backend.");
+      Alert.alert("Sem conexÃ£o", "O app ainda nÃ£o conectou ao backend.");
       return;
     }
 
@@ -805,8 +803,8 @@ export default function App() {
             onlineRef.current = false;
 
             Alert.alert(
-              "Não foi possível ficar online",
-              resposta?.mensagem || "Faça login novamente."
+              "NÃ£o foi possÃ­vel ficar online",
+              resposta?.mensagem || "FaÃ§a login novamente."
             );
             await pararMonitoramentoLocalizacao();
             setCarregando(false);
@@ -870,7 +868,7 @@ export default function App() {
       "Tem certeza que deseja finalizar esta corrida?",
       [
         {
-          text: "Não",
+          text: "NÃ£o",
           style: "cancel",
         },
         {
@@ -898,8 +896,8 @@ export default function App() {
       async (resposta) => {
         if (!resposta || !resposta.ok) {
           Alert.alert(
-            "Não foi possível cancelar",
-            resposta?.mensagem || "Essa corrida não está mais disponível."
+            "NÃ£o foi possÃ­vel cancelar",
+            resposta?.mensagem || "Essa corrida nÃ£o estÃ¡ mais disponÃ­vel."
           );
           return;
         }
@@ -909,7 +907,7 @@ export default function App() {
         setChamadaAtual(null);
         setCorridaAceita(false);
 
-        Alert.alert("Corrida cancelada", resposta.mensagem || "Corrida cancelada por você.");
+        Alert.alert("Corrida cancelada", resposta.mensagem || "Corrida cancelada por vocÃª.");
       }
     );
   }
@@ -922,7 +920,7 @@ export default function App() {
       "Tem certeza que deseja cancelar esta corrida?",
       [
         {
-          text: "Não",
+          text: "NÃ£o",
           style: "cancel",
         },
         {
@@ -936,7 +934,7 @@ export default function App() {
 
   async function abrirNavegacao() {
     if (!chamadaAtual) {
-      Alert.alert("Navegação", "Não há corrida aceita para abrir navegação.");
+      Alert.alert("NavegaÃ§Ã£o", "NÃ£o hÃ¡ corrida aceita para abrir navegaÃ§Ã£o.");
       return;
     }
 
@@ -945,8 +943,8 @@ export default function App() {
 
     if (!Number.isFinite(destinoLat) || !Number.isFinite(destinoLng)) {
       Alert.alert(
-        "Navegação",
-        "Não foi possível encontrar a localização do cliente nesta chamada."
+        "NavegaÃ§Ã£o",
+        "NÃ£o foi possÃ­vel encontrar a localizaÃ§Ã£o do cliente nesta chamada."
       );
       return;
     }
@@ -965,8 +963,8 @@ export default function App() {
       await Linking.openURL(url);
     } catch (error) {
       Alert.alert(
-        "Erro ao abrir navegação",
-        "Não foi possível abrir o aplicativo de mapas neste celular."
+        "Erro ao abrir navegaÃ§Ã£o",
+        "NÃ£o foi possÃ­vel abrir o aplicativo de mapas neste celular."
       );
     }
   }
@@ -976,7 +974,7 @@ export default function App() {
       <ScrollView contentContainerStyle={styles.container}>
         <StatusBar barStyle="light-content" />
 
-        <Text style={styles.titulo}>Cornélio Move</Text>
+        <Text style={styles.titulo}>CornÃ©lio Move</Text>
         <Text style={styles.subtitulo}>Login do Mototaxista - V9.1</Text>
 
         <View style={styles.conexaoLinha}>
@@ -1024,13 +1022,13 @@ export default function App() {
     <ScrollView contentContainerStyle={[styles.container, chamadaAtual && !corridaAceita ? styles.containerChamadaAtiva : null]}>
       <StatusBar barStyle="light-content" />
 
-      <Text style={styles.titulo}>Cornélio Move</Text>
-      <Text style={styles.subtitulo}>App do Mototaxista - V9.1</Text>
+      <Text style={styles.titulo}>CornÃ©lio Move</Text>
+      <Text style={styles.subtitulo}>App do Mototaxista - V9.3</Text>
 
       <View style={styles.conexaoLinha}>
         <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
         <Text style={styles.conexaoTexto}>
-          {conectado ? "Backend conectado" : "Backend desconectado"} • {statusFcm}
+          {conectado ? "Backend conectado" : "Backend desconectado"} â€¢ {statusFcm}
         </Text>
       </View>
 
@@ -1081,14 +1079,14 @@ export default function App() {
 
           {online && (
             <Text style={styles.modoTexto}>
-              GPS: {modoLocalizacao === "alta_precisao" ? "Alta precisão" : "Econômico"}
+              GPS: {modoLocalizacao === "alta_precisao" ? "Alta precisÃ£o" : "EconÃ´mico"}
             </Text>
           )}
 
           {localizacao && (
             <View style={styles.caixaLocalizacaoCompacta}>
               <Text style={styles.localizacaoTexto}>
-                Precisão GPS: {Math.round(localizacao.accuracy)} m
+                PrecisÃ£o GPS: {Math.round(localizacao.accuracy)} m
               </Text>
             </View>
           )}
@@ -1099,7 +1097,7 @@ export default function App() {
         <View style={styles.cardAguardando}>
           <Text style={styles.aguardandoTitulo}>Aguardando chamada</Text>
           <Text style={styles.aguardandoTexto}>
-            Quando o painel despachar uma corrida, ela aparecerá aqui.
+            Quando o painel despachar uma corrida, ela aparecerÃ¡ aqui.
           </Text>
         </View>
       )}
@@ -1107,11 +1105,11 @@ export default function App() {
       {chamadaAtual && corridaAceita && (
         <View style={styles.cardAceita}>
           <Text style={styles.chamadaTitulo}>Corrida aceita</Text>
-          <Text style={styles.info}>Vá até:</Text>
+          <Text style={styles.info}>VÃ¡ atÃ©:</Text>
           <Text style={styles.endereco}>{chamadaAtual.endereco}</Text>
 
           <TouchableOpacity style={styles.botaoAzul} onPress={abrirNavegacao}>
-            <Text style={styles.textoBotao}>Abrir navegação</Text>
+            <Text style={styles.textoBotao}>Abrir navegaÃ§Ã£o</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.botaoCancelar} onPress={cancelarCorrida}>

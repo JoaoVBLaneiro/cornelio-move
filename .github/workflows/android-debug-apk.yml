@@ -47,6 +47,9 @@ jobs:
       - name: Patch MainActivity lockscreen fullscreen
         run: python3 patch-mainactivity-lockscreen.py
 
+      - name: Patch native FCM service
+        run: python3 patch-native-fcm-service.py
+
       - name: Install Android NDK
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
@@ -75,3 +78,4 @@ jobs:
         with:
           name: CornelioMoveMotorista-v9-release-apk
           path: motorista-app/android/app/build/outputs/apk/release/app-release.apk
+
