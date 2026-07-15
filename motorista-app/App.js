@@ -43,6 +43,7 @@ export default function App() {
   const expoPushTokenRef = useRef(null);
   const fcmTokenRef = useRef(null);
   const buscandoChamadaPendenteRef = useRef(false);
+  const chamadaAtualRef = useRef(null);
 
   const [conectado, setConectado] = useState(false);
   const [online, setOnline] = useState(false);
@@ -1099,7 +1100,7 @@ export default function App() {
       <StatusBar barStyle="light-content" />
 
       <Text style={styles.titulo}>Cornelio Move</Text>
-      <Text style={styles.subtitulo}>App do Mototaxista - V9.6</Text>
+      <Text style={styles.subtitulo}>App do Mototaxista - V9.7</Text>
 
       <View style={styles.conexaoLinha}>
         <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
