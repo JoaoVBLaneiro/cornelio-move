@@ -449,11 +449,11 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
 
   private fun mostrarNotificacaoCorrida(data: Map<String, String>) {{
     val channelId = "corridas_urgentes_v10"
-    val notificationId = try {
+    val notificationId = try {{
       kotlin.math.abs(("corrida-" + (data["idChamada"] ?: "")).hashCode())
-    } catch (_: Exception) {
+    }} catch (_: Exception) {{
       991199
-    }
+    }}
 
     criarCanal(channelId)
 
