@@ -543,9 +543,34 @@ export default function App() {
     });
 
     socketRef.current.on("nova_chamada", (chamada) => {
-      setChamadaAtual(chamada);
-      setCorridaAceita(false);
+      console.log(
+        "Nova chamada recebida via Socket.IO ignorada no React. Fluxo nativo/FCM assume:",
+        chamada?.idChamada
+      );
     });
+
+    const limparChamadaNormalDoReact = (dados = {}) => {
+      const idChamada = String(dados.idChamada || "");
+
+      if (!idChamada) {
+        return;
+      }
+
+      setChamadaAtual((atual) => {
+        if (atual && String(atual.idChamada) === idChamada) {
+          return null;
+        }
+
+        return atual;
+      });
+
+      setCorridaAceita(false);
+    };
+
+    socketRef.current.on("chamada_aceita", limparChamadaNormalDoReact);
+    socketRef.current.on("chamada_recusada", limparChamadaNormalDoReact);
+    socketRef.current.on("corrida_finalizada", limparChamadaNormalDoReact);
+    socketRef.current.on("corrida_cancelada", limparChamadaNormalDoReact);
 
     socketRef.current.on("cancelar_chamada", (dados) => {
       setChamadaAtual((chamadaAtualAnterior) => {
@@ -1100,7 +1125,7 @@ export default function App() {
       <StatusBar barStyle="light-content" />
 
       <Text style={styles.titulo}>Cornelio Move</Text>
-      <Text style={styles.subtitulo}>App do Mototaxista - V10.1</Text>
+      <Text style={styles.subtitulo}>App do Mototaxista - V10.2</Text>
 
       <View style={styles.conexaoLinha}>
         <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
