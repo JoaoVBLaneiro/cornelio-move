@@ -2,6 +2,9 @@ name: Android Release APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - v9-tela-cheia-nativa
 
 jobs:
   build-android:
@@ -38,68 +41,11 @@ jobs:
       - name: Prebuild Android
         env:
           CI: 1
-          EXPO_PUBLIC_BACKEND_URL: http://207.180.245.177:3001
+          EXPO_PUBLIC_BACKEND_URL: "http://207.180.245.177:3001"
         run: npx expo prebuild --platform android --clean
 
-	      - name: Patch MainActivity lockscreen fullscreen
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          files = list(Path("android/app/src/main/java").rglob("MainActivity.kt"))
-          if not files:
-              raise SystemExit("MainActivity.kt nao encontrado")
-
-          p = files[0]
-          s = p.read_text()
-
-          def add_import(text, imp):
-              if imp in text:
-                  return text
-              return text.replace("import android.os.Bundle\n", "import android.os.Bundle\n" + imp + "\n")
-
-          s = add_import(s, "import android.app.KeyguardManager")
-          s = add_import(s, "import android.os.Build")
-          s = add_import(s, "import android.view.WindowManager")
-
-          if "private fun habilitarTelaCheiaSobreBloqueio()" not in s:
-              bloco = '''    super.onCreate(null)
-              habilitarTelaCheiaSobreBloqueio()
-            }
-
-            private fun habilitarTelaCheiaSobreBloqueio() {
-              window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                setShowWhenLocked(true)
-                setTurnScreenOn(true)
-
-                val keyguardManager = getSystemService(KeyguardManager::class.java)
-                keyguardManager?.requestDismissKeyguard(this, null)
-              } else {
-                window.addFlags(
-                  WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                )
-              }
-            }
-
-            override fun onResume() {
-              super.onResume()
-              habilitarTelaCheiaSobreBloqueio()
-            }'''
-
-              if "    super.onCreate(null)\n  }" in s:
-                  s = s.replace("    super.onCreate(null)\n  }", bloco)
-              elif "    super.onCreate(savedInstanceState)\n  }" in s:
-                  s = s.replace("    super.onCreate(savedInstanceState)\n  }", bloco.replace("super.onCreate(null)", "super.onCreate(savedInstanceState)"))
-              else:
-                  raise SystemExit("Nao encontrei o trecho super.onCreate para aplicar patch")
-
-          p.write_text(s)
-          print("MainActivity.kt patch aplicado em", p)
-          PY
+      - name: Patch MainActivity lockscreen fullscreen
+        run: python3 patch-mainactivity-lockscreen.py
 
       - name: Install Android NDK
         run: |
@@ -121,7 +67,7 @@ jobs:
 
       - name: Build release APK
         env:
-          EXPO_PUBLIC_BACKEND_URL: http://207.180.245.177:3001
+          EXPO_PUBLIC_BACKEND_URL: "http://207.180.245.177:3001"
         run: cd android && ./gradlew assembleRelease
 
       - name: Upload APK
