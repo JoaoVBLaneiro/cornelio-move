@@ -1100,7 +1100,7 @@ export default function App() {
       <StatusBar barStyle="light-content" />
 
       <Text style={styles.titulo}>Cornelio Move</Text>
-      <Text style={styles.subtitulo}>App do Mototaxista - V10.0</Text>
+      <Text style={styles.subtitulo}>App do Mototaxista - V10.1</Text>
 
       <View style={styles.conexaoLinha}>
         <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
@@ -1511,5 +1511,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
 });
+
 
 

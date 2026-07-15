@@ -356,11 +356,14 @@ class CornelioIncomingCallActivity : Activity() {{
                 abrirAppPrincipal()
               }}
 
-              finish()
+              intent.replaceExtras(android.os.Bundle())
+              finishAndRemoveTask()
             }}
           }} else {{
+            cancelarNotificacao()
             Toast.makeText(this, "Chamada indisponivel", Toast.LENGTH_LONG).show()
-            finish()
+            intent.replaceExtras(android.os.Bundle())
+            finishAndRemoveTask()
           }}
         }}
       }} catch (e: Exception) {{
@@ -374,11 +377,15 @@ class CornelioIncomingCallActivity : Activity() {{
 
   private fun cancelarNotificacao() {{
     try {{
+      val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
       val notificationId = intent.getIntExtra("notificationId", 0)
       if (notificationId != 0) {{
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.cancel(notificationId)
       }}
+
+      // Limpeza defensiva: remove qualquer vestigio de notificacao/fullscreen antigo.
+      manager.cancelAll()
     }} catch (_: Exception) {{}}
   }}
 
@@ -441,8 +448,12 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
   }}
 
   private fun mostrarNotificacaoCorrida(data: Map<String, String>) {{
-    val channelId = "corridas_urgentes_v9"
-    val notificationId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+    val channelId = "corridas_urgentes_v10"
+    val notificationId = try {
+      kotlin.math.abs(("corrida-" + (data["idChamada"] ?: "")).hashCode())
+    } catch (_: Exception) {
+      991199
+    }
 
     criarCanal(channelId)
 
