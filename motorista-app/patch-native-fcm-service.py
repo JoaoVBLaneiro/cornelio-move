@@ -113,7 +113,7 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
   }}
 
   private fun mostrarNotificacaoCorrida(data: Map<String, String>) {{
-    val channelId = "corridas_urgentes_v5"
+    val channelId = "corridas_urgentes_v6"
     val notificationId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
 
     criarCanal(channelId)
@@ -160,7 +160,7 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
       .setOngoing(false)
       .setAutoCancel(true)
-      .setTimeoutAfter(20000)
+      .setTimeoutAfter(45000)
       .setDefaults(NotificationCompat.DEFAULT_ALL)
       .setVibrate(longArrayOf(0, 700, 300, 700, 300, 700))
       .setContentIntent(fullScreenPendingIntent)
@@ -214,3 +214,4 @@ if "CornelioFirebaseMessagingService" not in text:
 
 manifest.write_text(text, encoding="utf-8")
 print("AndroidManifest.xml atualizado com servico FCM nativo")
+
