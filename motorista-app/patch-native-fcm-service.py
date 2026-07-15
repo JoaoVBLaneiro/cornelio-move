@@ -15,6 +15,28 @@ if not package_line:
 
 package_name = package_line.replace("package ", "").strip()
 
+# Garante dependencia direta do Firebase Messaging no modulo app
+gradle_file = Path("android/app/build.gradle")
+gradle_text = gradle_file.read_text(encoding="utf-8")
+
+if "com.google.firebase:firebase-messaging" not in gradle_text:
+    if "dependencies {" not in gradle_text:
+        raise SystemExit("Bloco dependencies nao encontrado em android/app/build.gradle")
+
+    gradle_text = gradle_text.replace(
+        "dependencies {",
+        """dependencies {
+    implementation platform("com.google.firebase:firebase-bom:34.15.0")
+    implementation "com.google.firebase:firebase-messaging"
+""",
+        1
+    )
+
+    gradle_file.write_text(gradle_text, encoding="utf-8")
+    print("Dependencia com.google.firebase:firebase-messaging adicionada ao app/build.gradle")
+else:
+    print("Dependencia Firebase Messaging ja existia no app/build.gradle")
+
 service_file = main.parent / "CornelioFirebaseMessagingService.kt"
 
 service_code = f'''package {package_name}
@@ -24,8 +46,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
@@ -38,6 +58,7 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
     super.onMessageReceived(remoteMessage)
 
     val data = remoteMessage.data
+
     if (data["tipo"] != "nova_corrida_motorista") {{
       return
     }}
@@ -61,7 +82,7 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
   }}
 
   private fun mostrarNotificacaoCorrida(data: Map<String, String>) {{
-    val channelId = "corridas_urgentes_v3"
+    val channelId = "corridas_urgentes_v4"
     val notificationId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
 
     criarCanal(channelId)
