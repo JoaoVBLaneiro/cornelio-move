@@ -197,7 +197,7 @@ export default function App() {
         observacao: dados.observacao || "",
         latitudePassageiro: dados.latitudePassageiro,
         longitudePassageiro: dados.longitudePassageiro,
-        distancia: dados.distancia || "DistÃ¢ncia a calcular",
+        distancia: dados.distancia || "Distancia a calcular",
         tempo: dados.tempo || "Tempo a calcular",
         origem: dados.origem || "Despacho",
         tokenTentativa: dados.tokenTentativa,
@@ -761,7 +761,7 @@ export default function App() {
 
   async function ficarOnlineOffline() {
     if (!motoristaLogado || !tokenSessao) {
-      Alert.alert("Login obrigatÃ³rio", "Entre na sua conta antes de ficar online.");
+      Alert.alert("Login obrigatorio", "Entre na sua conta antes de ficar online.");
       return;
     }
 
@@ -934,7 +934,7 @@ export default function App() {
 
   async function abrirNavegacao() {
     if (!chamadaAtual) {
-      Alert.alert("NavegaÃ§Ã£o", "NÃ£o hÃ¡ corrida aceita para abrir navegaÃ§Ã£o.");
+      Alert.alert("NavegaÃ§Ã£o", "NÃ£o hÃ¡ corrida aceita para abrir navegacao.");
       return;
     }
 
@@ -963,7 +963,7 @@ export default function App() {
       await Linking.openURL(url);
     } catch (error) {
       Alert.alert(
-        "Erro ao abrir navegaÃ§Ã£o",
+        "Erro ao abrir navegacao",
         "NÃ£o foi possÃ­vel abrir o aplicativo de mapas neste celular."
       );
     }
@@ -974,7 +974,7 @@ export default function App() {
       <ScrollView contentContainerStyle={styles.container}>
         <StatusBar barStyle="light-content" />
 
-        <Text style={styles.titulo}>CornÃ©lio Move</Text>
+        <Text style={styles.titulo}>Cornelio Move</Text>
         <Text style={styles.subtitulo}>Login do Mototaxista - V9.1</Text>
 
         <View style={styles.conexaoLinha}>
@@ -1022,13 +1022,13 @@ export default function App() {
     <ScrollView contentContainerStyle={[styles.container, chamadaAtual && !corridaAceita ? styles.containerChamadaAtiva : null]}>
       <StatusBar barStyle="light-content" />
 
-      <Text style={styles.titulo}>CornÃ©lio Move</Text>
-      <Text style={styles.subtitulo}>App do Mototaxista - V9.3</Text>
+      <Text style={styles.titulo}>Cornelio Move</Text>
+      <Text style={styles.subtitulo}>App do Mototaxista - V9.5</Text>
 
       <View style={styles.conexaoLinha}>
         <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
         <Text style={styles.conexaoTexto}>
-          {conectado ? "Backend conectado" : "Backend desconectado"} â€¢ {statusFcm}
+          {conectado ? "Backend conectado" : "Backend desconectado"} - {statusFcm}
         </Text>
       </View>
 
@@ -1079,14 +1079,14 @@ export default function App() {
 
           {online && (
             <Text style={styles.modoTexto}>
-              GPS: {modoLocalizacao === "alta_precisao" ? "Alta precisÃ£o" : "EconÃ´mico"}
+              GPS: {modoLocalizacao === "alta_precisao" ? "Alta precisao" : "Economico"}
             </Text>
           )}
 
           {localizacao && (
             <View style={styles.caixaLocalizacaoCompacta}>
               <Text style={styles.localizacaoTexto}>
-                PrecisÃ£o GPS: {Math.round(localizacao.accuracy)} m
+                Precisao GPS: {Math.round(localizacao.accuracy)} m
               </Text>
             </View>
           )}
@@ -1097,7 +1097,7 @@ export default function App() {
         <View style={styles.cardAguardando}>
           <Text style={styles.aguardandoTitulo}>Aguardando chamada</Text>
           <Text style={styles.aguardandoTexto}>
-            Quando o painel despachar uma corrida, ela aparecerÃ¡ aqui.
+            Quando o painel despachar uma corrida, ela aparecera aqui.
           </Text>
         </View>
       )}
@@ -1105,11 +1105,11 @@ export default function App() {
       {chamadaAtual && corridaAceita && (
         <View style={styles.cardAceita}>
           <Text style={styles.chamadaTitulo}>Corrida aceita</Text>
-          <Text style={styles.info}>VÃ¡ atÃ©:</Text>
+          <Text style={styles.info}>Va ate:</Text>
           <Text style={styles.endereco}>{chamadaAtual.endereco}</Text>
 
           <TouchableOpacity style={styles.botaoAzul} onPress={abrirNavegacao}>
-            <Text style={styles.textoBotao}>Abrir navegaÃ§Ã£o</Text>
+            <Text style={styles.textoBotao}>Abrir navegacao</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.botaoCancelar} onPress={cancelarCorrida}>

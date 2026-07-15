@@ -46,11 +46,13 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import java.net.URLEncoder
 
 class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
 
@@ -81,14 +83,48 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
     }}
   }}
 
+  private fun enc(valor: String?): String {{
+    return try {{
+      URLEncoder.encode(valor ?: "", "UTF-8")
+    }} catch (_: Exception) {{
+      ""
+    }}
+  }}
+
+  private fun montarUrlCorrida(data: Map<String, String>): String {{
+    val campos = listOf(
+      "idChamada",
+      "tokenTentativa",
+      "cliente",
+      "endereco",
+      "observacao",
+      "latitudePassageiro",
+      "longitudePassageiro",
+      "distancia",
+      "tempo",
+      "origem"
+    )
+
+    val query = campos.joinToString("&") {{ campo ->
+      campo + "=" + enc(data[campo])
+    }}
+
+    return "corneliomove://nova-corrida?" + query
+  }}
+
   private fun mostrarNotificacaoCorrida(data: Map<String, String>) {{
-    val channelId = "corridas_urgentes_v4"
+    val channelId = "corridas_urgentes_v5"
     val notificationId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
 
     criarCanal(channelId)
 
+    val urlCorrida = montarUrlCorrida(data)
+
     val launchIntent =
       packageManager.getLaunchIntentForPackage(packageName) ?: Intent(this, MainActivity::class.java)
+
+    launchIntent.action = Intent.ACTION_VIEW
+    launchIntent.data = Uri.parse(urlCorrida)
 
     launchIntent.addFlags(
       Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -118,12 +154,13 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
       .setSmallIcon(applicationInfo.icon)
       .setContentTitle("Nova corrida")
       .setContentText(endereco)
-      .setStyle(NotificationCompat.BigTextStyle().bigText("$cliente\\n$endereco"))
+      .setStyle(NotificationCompat.BigTextStyle().bigText(cliente + "\\n" + endereco))
       .setPriority(NotificationCompat.PRIORITY_MAX)
       .setCategory(NotificationCompat.CATEGORY_CALL)
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-      .setOngoing(true)
-      .setAutoCancel(false)
+      .setOngoing(false)
+      .setAutoCancel(true)
+      .setTimeoutAfter(20000)
       .setDefaults(NotificationCompat.DEFAULT_ALL)
       .setVibrate(longArrayOf(0, 700, 300, 700, 300, 700))
       .setContentIntent(fullScreenPendingIntent)
@@ -147,7 +184,7 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
       NotificationManager.IMPORTANCE_HIGH
     )
 
-    canal.description = "Chamadas de corrida do Cornélio Move"
+    canal.description = "Chamadas de corrida do Cornelio Move"
     canal.enableVibration(true)
     canal.vibrationPattern = longArrayOf(0, 700, 300, 700, 300, 700)
     canal.lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
