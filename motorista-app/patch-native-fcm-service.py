@@ -15,6 +15,38 @@ if not package_line:
 
 package_name = package_line.replace("package ", "").strip()
 
+app_state_file = main.parent / "CornelioAppForegroundState.kt"
+app_state_code = f'''package {package_name}
+
+object CornelioAppForegroundState {{
+  @Volatile
+  var emPrimeiroPlano: Boolean = false
+}}
+'''
+app_state_file.write_text(app_state_code, encoding="utf-8")
+print("CornelioAppForegroundState atualizado")
+
+if "CornelioAppForegroundState.emPrimeiroPlano" not in main_text:
+    insercao_main = '''
+  override fun onResume() {
+    super.onResume()
+    CornelioAppForegroundState.emPrimeiroPlano = true
+  }
+
+  override fun onPause() {
+    CornelioAppForegroundState.emPrimeiroPlano = false
+    super.onPause()
+  }
+'''
+    pos = main_text.rfind("\n}")
+    if pos < 0:
+        raise SystemExit("Nao encontrei fechamento da classe MainActivity.kt")
+    main_text = main_text[:pos] + insercao_main + main_text[pos:]
+    main.write_text(main_text, encoding="utf-8")
+    print("MainActivity atualizado com estado de primeiro plano")
+else:
+    print("MainActivity ja tinha estado de primeiro plano")
+
 gradle_file = Path("android/app/build.gradle")
 gradle_text = gradle_file.read_text(encoding="utf-8")
 
@@ -514,6 +546,10 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
     val data = remoteMessage.data
 
     if (data["tipo"] != "nova_corrida_motorista") {{
+      return
+    }}
+
+    if (CornelioAppForegroundState.emPrimeiroPlano) {{
       return
     }}
 
