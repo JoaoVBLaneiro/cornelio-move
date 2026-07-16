@@ -60,13 +60,22 @@ import java.net.URLEncoder
 class CornelioIncomingCallActivity : Activity() {{
 
   private val backendUrl = "http://207.180.245.177:3001"
+  private val monitorHandler = Handler(Looper.getMainLooper())
+  @Volatile
+  private var monitorandoTentativa = false
 
   override fun onCreate(savedInstanceState: Bundle?) {{
     super.onCreate(savedInstanceState)
 
     habilitarTelaBloqueada()
     montarTela()
+    iniciarMonitoramentoTentativa()
 
+  }}
+
+  override fun onDestroy() {{
+    pararMonitoramentoTentativa()
+    super.onDestroy()
   }}
 
   private fun habilitarTelaBloqueada() {{
@@ -91,6 +100,82 @@ class CornelioIncomingCallActivity : Activity() {{
 
   private fun extra(nome: String): String {{
     return intent.getStringExtra(nome) ?: ""
+  }}
+
+
+  private fun iniciarMonitoramentoTentativa() {{
+    monitorandoTentativa = true
+    checarStatusTentativa()
+  }}
+
+  private fun pararMonitoramentoTentativa() {{
+    monitorandoTentativa = false
+    monitorHandler.removeCallbacksAndMessages(null)
+  }}
+
+  private fun checarStatusTentativa() {{
+    if (!monitorandoTentativa || isFinishing) {{
+      return
+    }}
+
+    Thread {{
+      try {{
+        val urlTexto =
+          backendUrl +
+            "/motorista/nativo/status?idChamada=" + URLEncoder.encode(extra("idChamada"), "UTF-8") +
+            "&tokenTentativa=" + URLEncoder.encode(extra("tokenTentativa"), "UTF-8") +
+            "&idMotorista=" + URLEncoder.encode(extra("idMotorista"), "UTF-8")
+
+        val conn = URL(urlTexto).openConnection() as HttpURLConnection
+        conn.requestMethod = "GET"
+        conn.connectTimeout = 5000
+        conn.readTimeout = 5000
+
+        val code = conn.responseCode
+        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+        val respostaTexto = stream?.bufferedReader(Charsets.UTF_8)?.use {{ it.readText() }} ?: ""
+
+        val json = try {{
+          JSONObject(respostaTexto)
+        }} catch (_: Exception) {{
+          JSONObject()
+        }}
+
+        val ok = json.optBoolean("ok", false)
+        val ativa = json.optBoolean("ativa", true)
+
+        if (ok && !ativa) {{
+          runOnUiThread {{
+            encerrarChamadaExpirada()
+          }}
+          return@Thread
+        }}
+      }} catch (_: Exception) {{
+        // Se a internet falhar por alguns segundos, nao fecha a chamada.
+      }}
+
+      runOnUiThread {{
+        if (monitorandoTentativa && !isFinishing) {{
+          monitorHandler.postDelayed({{ checarStatusTentativa() }}, 1200)
+        }}
+      }}
+    }}.start()
+  }}
+
+  private fun encerrarChamadaExpirada() {{
+    if (!monitorandoTentativa || isFinishing) {{
+      return
+    }}
+
+    monitorandoTentativa = false
+    cancelarNotificacao()
+    Toast.makeText(
+      this,
+      "Chamada expirada. Enviada para outro motorista.",
+      Toast.LENGTH_LONG
+    ).show()
+    intent.replaceExtras(android.os.Bundle())
+    finishAndRemoveTask()
   }}
 
   private fun montarTela() {{
@@ -305,6 +390,8 @@ class CornelioIncomingCallActivity : Activity() {{
   }}
 
   private fun enviarAcao(acao: String) {{
+    pararMonitoramentoTentativa()
+
     Thread {{
       try {{
         val url = URL(backendUrl + "/motorista/nativo/" + acao)
@@ -448,7 +535,7 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
   }}
 
   private fun mostrarNotificacaoCorrida(data: Map<String, String>) {{
-    val channelId = "corridas_urgentes_v10"
+    val channelId = "corridas_urgentes_v11"
     val notificationId = try {{
       kotlin.math.abs(("corrida-" + (data["idChamada"] ?: "")).hashCode())
     }} catch (_: Exception) {{
