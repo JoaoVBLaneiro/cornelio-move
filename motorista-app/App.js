@@ -697,19 +697,24 @@ export default function App() {
 
     if (socketRef.current) {
       socketRef.current.emit("motorista_offline");
-    }
 
-    await pararMonitoramentoLocalizacao();
+      await pararMonitoramentoLocalizacao();
 
-    onlineRef.current = false;
-    motoristaLogadoRef.current = null;
-    tokenSessaoRef.current = null;
+      onlineRef.current = false;
+      setOnline(false);
+      setLocalizacao(null);
 
-    setOnline(false);
-    setLocalizacao(null);
-    setChamadaAtual(null);
-    setCorridaAceita(false);
-    setModoLocalizacao("economico");
+      if (chamadaAtual && corridaAceita) {
+        console.log(
+          "Motorista ficou offline, mas corrida aceita continua visivel:",
+          chamadaAtual.idChamada
+        );
+      } else {
+        setChamadaAtual(null);
+        setCorridaAceita(false);
+      }
+
+      setModoLocalizacao("economico");
     setMotoristaLogado(null);
     setTokenSessao(null);
     setSenha("");
@@ -847,7 +852,27 @@ export default function App() {
             return;
           }
 
-          await iniciarMonitoramentoLocalizacao("economico");
+          if (resposta.corridaAtiva) {
+            console.log("Corrida ativa recuperada ao ficar online:", resposta.corridaAtiva);
+
+            setChamadaAtual({
+              idChamada: resposta.corridaAtiva.idChamada,
+              cliente: resposta.corridaAtiva.cliente || "Cliente",
+              endereco: resposta.corridaAtiva.endereco || "Endereco nao informado",
+              observacao: resposta.corridaAtiva.observacao || "",
+              latitudePassageiro: resposta.corridaAtiva.latitudePassageiro,
+              longitudePassageiro: resposta.corridaAtiva.longitudePassageiro,
+              distancia: resposta.corridaAtiva.distancia || "",
+              tempo: resposta.corridaAtiva.tempo || "",
+              origem: resposta.corridaAtiva.origem || "Despacho",
+              tokenTentativa: resposta.corridaAtiva.tokenTentativa || "",
+            });
+
+            setCorridaAceita(true);
+            await iniciarMonitoramentoLocalizacao("alta_precisao");
+          } else {
+            await iniciarMonitoramentoLocalizacao("economico");
+          }
 
           onlineRef.current = true;
           setOnline(true);
@@ -1125,7 +1150,7 @@ export default function App() {
       <StatusBar barStyle="light-content" />
 
       <Text style={styles.titulo}>Cornelio Move</Text>
-      <Text style={styles.subtitulo}>App do Mototaxista - V10.6</Text>
+      <Text style={styles.subtitulo}>App do Mototaxista - V10.7</Text>
 
       <View style={styles.conexaoLinha}>
         <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
