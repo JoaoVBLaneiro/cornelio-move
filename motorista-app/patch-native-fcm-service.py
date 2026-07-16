@@ -15,38 +15,6 @@ if not package_line:
 
 package_name = package_line.replace("package ", "").strip()
 
-app_state_file = main.parent / "CornelioAppForegroundState.kt"
-app_state_code = f'''package {package_name}
-
-object CornelioAppForegroundState {{
-  @Volatile
-  var emPrimeiroPlano: Boolean = false
-}}
-'''
-app_state_file.write_text(app_state_code, encoding="utf-8")
-print("CornelioAppForegroundState atualizado")
-
-if "CornelioAppForegroundState.emPrimeiroPlano" not in main_text:
-    insercao_main = '''
-  override fun onResume() {
-    super.onResume()
-    CornelioAppForegroundState.emPrimeiroPlano = true
-  }
-
-  override fun onPause() {
-    CornelioAppForegroundState.emPrimeiroPlano = false
-    super.onPause()
-  }
-'''
-    pos = main_text.rfind("\n}")
-    if pos < 0:
-        raise SystemExit("Nao encontrei fechamento da classe MainActivity.kt")
-    main_text = main_text[:pos] + insercao_main + main_text[pos:]
-    main.write_text(main_text, encoding="utf-8")
-    print("MainActivity atualizado com estado de primeiro plano")
-else:
-    print("MainActivity ja tinha estado de primeiro plano")
-
 gradle_file = Path("android/app/build.gradle")
 gradle_text = gradle_file.read_text(encoding="utf-8")
 
@@ -68,6 +36,7 @@ activity_code = f'''package {package_name}
 import android.app.Activity
 import android.app.KeyguardManager
 import android.app.NotificationManager
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -534,6 +503,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.PowerManager
+import android.os.Process
 import androidx.core.app.NotificationCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -549,12 +519,31 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
       return
     }}
 
-    if (CornelioAppForegroundState.emPrimeiroPlano) {{
+    if (aplicativoEmPrimeiroPlano()) {{
       return
     }}
 
     acordarTela()
     mostrarNotificacaoCorrida(data)
+  }}
+
+
+  private fun aplicativoEmPrimeiroPlano(): Boolean {{
+    return try {{
+      val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+      val processos = manager.runningAppProcesses ?: return false
+      val pid = Process.myPid()
+
+      processos.any {{ processo ->
+        processo.pid == pid &&
+          (
+            processo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND ||
+            processo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
+          )
+      }}
+    }} catch (_: Exception) {{
+      false
+    }}
   }}
 
   private fun acordarTela() {{
@@ -571,7 +560,7 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
   }}
 
   private fun mostrarNotificacaoCorrida(data: Map<String, String>) {{
-    val channelId = "corridas_urgentes_v11"
+    val channelId = "corridas_urgentes_v12"
     val notificationId = try {{
       kotlin.math.abs(("corrida-" + (data["idChamada"] ?: "")).hashCode())
     }} catch (_: Exception) {{
