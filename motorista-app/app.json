@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cornelio Move Motorista",
     "slug": "motorista-app",
-    "version": "1.0.105",
+    "version": "1.0.106",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
@@ -10,7 +10,7 @@
     ],
     "android": {
       "package": "com.corneliomove.motorista",
-      "versionCode": 105,
+      "versionCode": 106,
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_FINE_LOCATION",
