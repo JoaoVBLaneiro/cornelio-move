@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "passageiro-app",
-    "slug": "passageiro-app",
+    "name": "Cornelio Move Passageiro",
+    "slug": "cornelio-move-passageiro",
     "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -21,10 +21,12 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "versionCode": 2
+      "versionCode": 3,
+      "package": "com.corneliomove.passageiro"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "scheme": "corneliomovepassageiro"
   }
 }
