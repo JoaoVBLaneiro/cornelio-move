@@ -2,22 +2,23 @@ name: Build APK Passageiro
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "passageiro-app/**"
-      - ".github/workflows/build-passageiro-apk.yml"
 
 jobs:
-  build:
+  build-passageiro:
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: passageiro-app
-
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
+
+      - name: Mostrar estrutura
+        run: |
+          pwd
+          ls -la
+          echo "---- passageiro-app ----"
+          ls -la passageiro-app
+          echo "---- motorista-app ----"
+          ls -la motorista-app || true
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -30,20 +31,58 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Install dependencies
+      - name: Validar app passageiro antes do build
+        working-directory: passageiro-app
+        run: |
+          node -e "const j=require('./app.json'); console.log('name:', j.expo.name); console.log('slug:', j.expo.slug); console.log('android.package:', j.expo.android && j.expo.android.package); if (!j.expo.android || j.expo.android.package !== 'com.corneliomove.passageiro') { throw new Error('ERRO: app passageiro nao esta com package com.corneliomove.passageiro'); }"
+
+      - name: Instalar dependencias passageiro
+        working-directory: passageiro-app
         run: npm install
 
-      - name: Prebuild Android
+      - name: Limpar android antigo se existir
+        working-directory: passageiro-app
+        run: rm -rf android
+
+      - name: Prebuild Android passageiro
+        working-directory: passageiro-app
         run: npx expo prebuild --platform android --clean
 
-      - name: Build release APK
+      - name: Validar applicationId gerado
+        working-directory: passageiro-app
+        run: |
+          echo "---- Procurando packages Cornelio ----"
+          grep -R "com.corneliomove" -n android || true
+
+          echo "---- build.gradle ----"
+          grep -R "applicationId" -n android/app/build.gradle || true
+          grep -R "namespace" -n android/app/build.gradle || true
+
+          if grep -R "com.corneliomove.motorista" -n android; then
+            echo "ERRO: Android gerado ainda contem package do motorista"
+            exit 1
+          fi
+
+          if ! grep -R "com.corneliomove.passageiro" -n android; then
+            echo "ERRO: Android gerado nao contem package do passageiro"
+            exit 1
+          fi
+
+      - name: Build APK passageiro
+        working-directory: passageiro-app
         run: |
           cd android
           chmod +x ./gradlew
           ./gradlew assembleRelease
 
-      - name: Upload APK
+      - name: Renomear APK passageiro
+        run: |
+          mkdir -p artifacts
+          cp passageiro-app/android/app/build/outputs/apk/release/app-release.apk artifacts/cornelio-move-passageiro-com.corneliomove.passageiro.apk
+          ls -lh artifacts
+
+      - name: Upload APK Passageiro
         uses: actions/upload-artifact@v4
         with:
-          name: cornelio-move-passageiro-apk
-          path: passageiro-app/android/app/build/outputs/apk/release/app-release.apk
+          name: cornelio-move-passageiro-com-corneliomove-passageiro
+          path: artifacts/cornelio-move-passageiro-com.corneliomove.passageiro.apk
