@@ -1,0 +1,49 @@
+name: Build APK Passageiro
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "passageiro-app/**"
+      - ".github/workflows/build-passageiro-apk.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: passageiro-app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Prebuild Android
+        run: npx expo prebuild --platform android --clean
+
+      - name: Build release APK
+        run: |
+          cd android
+          chmod +x ./gradlew
+          ./gradlew assembleRelease
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: cornelio-move-passageiro-apk
+          path: passageiro-app/android/app/build/outputs/apk/release/app-release.apk
