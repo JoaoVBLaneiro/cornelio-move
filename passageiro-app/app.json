@@ -22,11 +22,22 @@
       },
       "edgeToEdgeEnabled": true,
       "versionCode": 3,
-      "package": "com.corneliomove.passageiro"
+      "package": "com.corneliomove.passageiro",
+      "usesCleartextTraffic": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "scheme": "corneliomovepassageiro"
+    "scheme": "corneliomovepassageiro",
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ]
   }
 }

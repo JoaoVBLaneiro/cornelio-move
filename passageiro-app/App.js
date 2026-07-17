@@ -12,7 +12,7 @@ import {
 import * as Location from "expo-location";
 import { io } from "socket.io-client";
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const BACKEND_URL = (process.env.EXPO_PUBLIC_BACKEND_URL || "http://207.180.245.177:3001").replace(/\/$/, "");
 
 function normalizarCelular(valor) {
   return String(valor || "").replace(/\D/g, "");

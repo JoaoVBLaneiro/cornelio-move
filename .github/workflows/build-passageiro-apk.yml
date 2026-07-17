@@ -2,6 +2,13 @@ name: Build APK Passageiro
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - "passageiro-app/**"
+      - ".github/workflows/build-passageiro-apk.yml"
+
+env:
+  EXPO_PUBLIC_BACKEND_URL: http://207.180.245.177:3001
 
 jobs:
   build-passageiro:
