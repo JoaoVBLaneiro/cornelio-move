@@ -21,7 +21,7 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "versionCode": 6,
+      "versionCode": 7,
       "package": "com.corneliomove.passageiro",
       "usesCleartextTraffic": true
     },

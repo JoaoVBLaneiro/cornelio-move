@@ -51,6 +51,7 @@ function gerarMapaHtmlPassageiro(localizacao, motoristaMapa, nomeMotorista) {
     passageiro,
     motorista,
     nomeMotorista: nomeMotorista || motoristaMapa?.nomeMotorista || "Mototaxista",
+    tipoMotorista: motoristaMapa?.tipo || "",
   });
 
   return `<!DOCTYPE html>
@@ -125,13 +126,17 @@ function gerarMapaHtmlPassageiro(localizacao, motoristaMapa, nomeMotorista) {
     if (dados.motorista) {
       const m = [dados.motorista.latitude, dados.motorista.longitude];
       pontos.push(m);
-      L.circleMarker(m, {
-        radius: 10,
-        color: '#0f172a',
-        weight: 3,
-        fillColor: '#facc15',
-        fillOpacity: 1
-      }).addTo(map).bindTooltip(dados.nomeMotorista || 'Mototaxista', { permanent: true, direction: 'top', className: 'rotulo' });
+
+      const iconeMoto = L.divIcon({
+        className: '',
+        html: '<div style="width:38px;height:38px;border-radius:999px;background:#facc15;border:3px solid #0f172a;display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 8px 18px rgba(0,0,0,0.28);">🏍️</div>',
+        iconSize: [38, 38],
+        iconAnchor: [19, 19]
+      });
+
+      L.marker(m, { icon: iconeMoto })
+        .addTo(map)
+        .bindTooltip(dados.nomeMotorista || 'Mototaxista', { permanent: true, direction: 'top', className: 'rotulo' });
     }
 
     if (pontos.length >= 2) {
@@ -325,14 +330,48 @@ export default function App() {
     socketRef.current.on("status_chamada", async (dados) => {
       setStatus(dados.mensagem || "Atualizacao da chamada.");
 
-      if (
+      if (dados.status === "tentando_motorista" && dados.idChamada) {
+        const latitudeMotorista = Number(dados.latitudeMotorista ?? dados.motoristaLocalizacao?.latitude);
+        const longitudeMotorista = Number(dados.longitudeMotorista ?? dados.motoristaLocalizacao?.longitude);
+        const nomeMotoristaTentativa =
+          dados.nomeMotorista || dados.motorista || dados.motoristaLocalizacao?.nomeMotorista || "Mototaxista";
+
+        setChamadaAtual({
+          idChamada: dados.idChamada,
+          nomeMotorista: nomeMotoristaTentativa,
+          idMotorista: dados.idMotorista || dados.motoristaLocalizacao?.idMotorista,
+          distancia: dados.distancia || dados.motoristaLocalizacao?.distancia || "",
+          tempo: dados.tempo || dados.motoristaLocalizacao?.tempo || "",
+        });
+
+        setMotoristaAceitou(null);
+        setBuscando(true);
+        setCancelandoPedido(false);
+
+        if (coordenadaValida(latitudeMotorista) && coordenadaValida(longitudeMotorista)) {
+          setMotoristaMapa({
+            idMotorista: dados.idMotorista || dados.motoristaLocalizacao?.idMotorista,
+            nomeMotorista: nomeMotoristaTentativa,
+            latitude: latitudeMotorista,
+            longitude: longitudeMotorista,
+            accuracy: dados.accuracyMotorista || dados.motoristaLocalizacao?.accuracy,
+            distancia: dados.distancia || dados.motoristaLocalizacao?.distancia || "",
+            tempo: dados.tempo || dados.motoristaLocalizacao?.tempo || "",
+            tipo: "tentativa",
+          });
+        } else {
+          setMotoristaMapa(null);
+        }
+      } else if (
         dados.idChamada &&
         (
-          dados.status === "tentando_motorista" ||
-          dados.status === "motorista_nao_respondeu"
+          dados.status === "motorista_nao_respondeu" ||
+          dados.status === "recusada"
         )
       ) {
         setChamadaAtual((atual) => atual?.idChamada ? atual : { idChamada: dados.idChamada });
+        setMotoristaMapa(null);
+        setBuscando(true);
       }
 
       if (dados.status === "pedido_cancelado") {
@@ -364,12 +403,44 @@ export default function App() {
     });
 
     socketRef.current.on("chamada_aceita_passageiro", (dados) => {
+      const latitudeMotorista = Number(dados.latitudeMotorista);
+      const longitudeMotorista = Number(dados.longitudeMotorista);
+
       setMotoristaAceitou(dados.nomeMotorista);
       setChamadaAtual({
         idChamada: dados.idChamada,
         nomeMotorista: dados.nomeMotorista,
         idMotorista: dados.idMotorista,
+        distancia: dados.distancia || "",
+        tempo: dados.tempo || "",
       });
+
+      if (coordenadaValida(latitudeMotorista) && coordenadaValida(longitudeMotorista)) {
+        setMotoristaMapa({
+          idMotorista: dados.idMotorista,
+          nomeMotorista: dados.nomeMotorista,
+          latitude: latitudeMotorista,
+          longitude: longitudeMotorista,
+          accuracy: dados.accuracyMotorista,
+          distancia: dados.distancia || "",
+          tempo: dados.tempo || "",
+          tipo: "aceita",
+        });
+      } else {
+        setMotoristaMapa((atual) =>
+          atual
+            ? {
+                ...atual,
+                idMotorista: dados.idMotorista || atual.idMotorista,
+                nomeMotorista: dados.nomeMotorista || atual.nomeMotorista,
+                distancia: dados.distancia || atual.distancia,
+                tempo: dados.tempo || atual.tempo,
+                tipo: "aceita",
+              }
+            : atual
+        );
+      }
+
       setStatus(dados.mensagem || `${dados.nomeMotorista} aceitou sua chamada.`);
       setBuscando(false);
       setCancelandoPedido(false);
@@ -387,6 +458,9 @@ export default function App() {
           latitude: dados.latitude,
           longitude: dados.longitude,
           accuracy: dados.accuracy,
+          distancia: dados.distancia || atual.distancia || "",
+          tempo: dados.tempo || atual.tempo || "",
+          tipo: dados.statusChamada === "tentando_motorista" && !motoristaAceitou ? "tentativa" : "aceita",
         });
 
         return atual;
@@ -455,14 +529,17 @@ export default function App() {
           return;
         }
 
-        setMotoristaMapa({
+        setMotoristaMapa((atual) => ({
           idMotorista: motorista.idMotorista || chamadaAtual.idMotorista,
           nomeMotorista: motorista.nomeMotorista || chamadaAtual.nomeMotorista || motoristaAceitou || "Mototaxista",
           latitude,
           longitude,
           online: motorista.online,
           statusOperacional: motorista.statusOperacional,
-        });
+          distancia: atual?.distancia || chamadaAtual.distancia || "",
+          tempo: atual?.tempo || chamadaAtual.tempo || "",
+          tipo: motoristaAceitou ? "aceita" : atual?.tipo || "tentativa",
+        }));
       } catch (error) {
         console.log("Erro ao buscar motorista no mapa:", error.message);
       }
@@ -845,12 +922,25 @@ export default function App() {
     );
   }
 
-  const mapaHtml = gerarMapaHtmlPassageiro(localizacao, motoristaMapa, motoristaAceitou);
+  const nomeMotoristaPainel =
+    motoristaAceitou || motoristaMapa?.nomeMotorista || chamadaAtual?.nomeMotorista || "";
+  const distanciaMotoristaPainel = motoristaMapa?.distancia || chamadaAtual?.distancia || "";
+  const tempoMotoristaPainel = motoristaMapa?.tempo || chamadaAtual?.tempo || "";
+  const detalheMotoristaPainel = [distanciaMotoristaPainel, tempoMotoristaPainel].filter(Boolean).join(" • ");
+  const labelMotoristaPainel = motoristaAceitou ? "Mototaxista a caminho" : "Tentando mototaxista";
+  const infoMotoristaPainel =
+    detalheMotoristaPainel ||
+    (motoristaMapa ? "Localizacao do mototaxista no mapa" : "Aguardando localizacao do mototaxista...");
+
+  const mapaHtml = gerarMapaHtmlPassageiro(localizacao, motoristaMapa, nomeMotoristaPainel || motoristaAceitou);
   const chaveMapa = [
     localizacao?.latitude,
     localizacao?.longitude,
     motoristaMapa?.latitude,
     motoristaMapa?.longitude,
+    motoristaMapa?.distancia,
+    motoristaMapa?.tempo,
+    motoristaMapa?.tipo,
     chamadaAtual?.idChamada || "sem-corrida",
   ].join("-");
 
@@ -894,13 +984,11 @@ export default function App() {
         <Text style={styles.nomeAppMapa}>Cornelio Move</Text>
         <Text style={styles.statusMapa}>{status}</Text>
 
-        {motoristaAceitou && (
+        {nomeMotoristaPainel && (
           <View style={styles.caixaMotoristaMapa}>
-            <Text style={styles.labelMotoristaMapa}>Mototaxista</Text>
-            <Text style={styles.nomeMotoristaMapa}>{motoristaAceitou}</Text>
-            <Text style={styles.infoMotoristaMapa}>
-              {motoristaMapa ? "Localizacao do mototaxista no mapa" : "Aguardando localizacao do mototaxista..."}
-            </Text>
+            <Text style={styles.labelMotoristaMapa}>{labelMotoristaPainel}</Text>
+            <Text style={styles.nomeMotoristaMapa}>{nomeMotoristaPainel}</Text>
+            <Text style={styles.infoMotoristaMapa}>{infoMotoristaPainel}</Text>
           </View>
         )}
 
