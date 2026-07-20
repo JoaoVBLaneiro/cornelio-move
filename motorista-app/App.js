@@ -12,16 +12,18 @@ import {
   View,
 } from "react-native";
 import * as Location from "expo-location";
+import * as SecureStore from "expo-secure-store";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import notifee, { EventType, AndroidImportance, AndroidCategory, AndroidVisibility } from "@notifee/react-native";
 import messaging from "@react-native-firebase/messaging";
 import { io } from "socket.io-client";
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const BACKEND_URL = (process.env.EXPO_PUBLIC_BACKEND_URL || "http://207.180.245.177:3001").replace(/\/$/, "");
 const CATEGORIA_CORRIDA = "corrida";
 const CANAL_CORRIDAS = "corridas";
 const CANAL_CORRIDAS_URGENTES = "corridas-urgentes";
+const STORAGE_MOTORISTA = "cornelio_move_motorista_sessao_v1";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -60,6 +62,7 @@ export default function App() {
   const [tokenSessao, setTokenSessao] = useState(null);
   const [statusPush, setStatusPush] = useState("Configurando notificacÃµes...");
   const [statusFcm, setStatusFcm] = useState("Preparando chamada em tela cheia...");
+  const [restaurandoSessao, setRestaurandoSessao] = useState(true);
 
   async function configurarNotificacoesPush() {
     try {
@@ -391,6 +394,133 @@ export default function App() {
     setCorridaAceita(false);
   }
 
+
+  async function salvarSessaoMotorista(opcoes = {}) {
+    try {
+      const motoristaAtual = opcoes.motorista || motoristaLogadoRef.current || motoristaLogado;
+      const tokenAtual = opcoes.tokenSessao || tokenSessaoRef.current || tokenSessao;
+      const loginAtual = String(opcoes.login || motoristaAtual?.login || login || "").trim();
+      const senhaAtual = String(
+        Object.prototype.hasOwnProperty.call(opcoes, "senha") ? opcoes.senha : senha
+      );
+
+      if (!loginAtual || !senhaAtual) {
+        return;
+      }
+
+      const payload = {
+        login: loginAtual,
+        senha: senhaAtual,
+        motorista: motoristaAtual || null,
+        tokenSessao: tokenAtual || null,
+        desejaOnline: Boolean(
+          Object.prototype.hasOwnProperty.call(opcoes, "desejaOnline")
+            ? opcoes.desejaOnline
+            : desejaFicarOnlineRef.current
+        ),
+        salvoEm: new Date().toISOString(),
+      };
+
+      await SecureStore.setItemAsync(STORAGE_MOTORISTA, JSON.stringify(payload));
+    } catch (error) {
+      console.log("Erro ao salvar sessao do motorista:", error.message);
+    }
+  }
+
+  async function limparSessaoMotoristaSalva() {
+    try {
+      await SecureStore.deleteItemAsync(STORAGE_MOTORISTA);
+    } catch (error) {
+      console.log("Erro ao limpar sessao do motorista:", error.message);
+    }
+  }
+
+  async function loginMotoristaComCredenciaisSalvas(loginSalvo, senhaSalva, motivo = "auto") {
+    const loginLimpo = String(loginSalvo || "").trim();
+    const senhaLimpa = String(senhaSalva || "");
+
+    if (!loginLimpo || !senhaLimpa) {
+      return null;
+    }
+
+    const resposta = await fetch(BACKEND_URL + "/auth/login-motorista", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        login: loginLimpo,
+        senha: senhaLimpa,
+      }),
+    });
+
+    const dados = await resposta.json().catch(() => null);
+
+    if (!resposta.ok || !dados?.ok) {
+      throw new Error(dados?.mensagem || "Nao foi possivel restaurar login do motorista.");
+    }
+
+    motoristaLogadoRef.current = dados.motorista;
+    tokenSessaoRef.current = dados.tokenSessao;
+
+    setLogin(loginLimpo);
+    setMotoristaLogado(dados.motorista);
+    setTokenSessao(dados.tokenSessao);
+
+    await salvarSessaoMotorista({
+      login: loginLimpo,
+      senha: senhaLimpa,
+      motorista: dados.motorista,
+      tokenSessao: dados.tokenSessao,
+    });
+
+    console.log("Login do motorista restaurado:", motivo);
+
+    return dados;
+  }
+
+  async function restaurarSessaoMotoristaSalva(motivo = "abertura_app") {
+    if (!BACKEND_URL) {
+      setRestaurandoSessao(false);
+      return;
+    }
+
+    try {
+      setRestaurandoSessao(true);
+
+      const bruto = await SecureStore.getItemAsync(STORAGE_MOTORISTA);
+
+      if (!bruto) {
+        return;
+      }
+
+      const sessao = JSON.parse(bruto);
+      const loginSalvo = String(sessao.login || "").trim();
+      const senhaSalva = String(sessao.senha || "");
+
+      if (!loginSalvo || !senhaSalva) {
+        await limparSessaoMotoristaSalva();
+        return;
+      }
+
+      setLogin(loginSalvo);
+
+      await loginMotoristaComCredenciaisSalvas(loginSalvo, senhaSalva, motivo);
+
+      if (sessao.desejaOnline) {
+        desejaFicarOnlineRef.current = true;
+
+        setTimeout(() => {
+          restaurarOnlineAutomaticamente();
+        }, 500);
+      }
+    } catch (error) {
+      console.log("Nao foi possivel restaurar sessao do motorista:", error.message);
+    } finally {
+      setRestaurandoSessao(false);
+    }
+  }
+
   useEffect(() => {
     onlineRef.current = online;
   }, [online]);
@@ -402,6 +532,10 @@ export default function App() {
   useEffect(() => {
     tokenSessaoRef.current = tokenSessao;
   }, [tokenSessao]);
+
+  useEffect(() => {
+    restaurarSessaoMotoristaSalva("inicio_app");
+  }, []);
 
   useEffect(() => {
     configurarNotificacoesPush();
@@ -538,8 +672,9 @@ export default function App() {
     });
 
     socketRef.current.on("auth_erro", async (dados) => {
-      Alert.alert("Sessao invalida", dados.mensagem || "Faca login novamente.");
-      await sairDaConta(true);
+      console.log("Sessao do motorista invalida, tentando relogar automaticamente:", dados?.mensagem);
+      await sairDaConta(true, false);
+      await restaurarSessaoMotoristaSalva("auth_erro");
     });
 
     socketRef.current.on("nova_chamada", (chamada) => {
@@ -675,6 +810,13 @@ export default function App() {
 
       setMotoristaLogado(dados.motorista);
       setTokenSessao(dados.tokenSessao);
+      await salvarSessaoMotorista({
+        login: loginLimpo,
+        senha,
+        motorista: dados.motorista,
+        tokenSessao: dados.tokenSessao,
+        desejaOnline: desejaFicarOnlineRef.current,
+      });
       setSenha("");
      } catch (error) {
   Alert.alert(
@@ -687,7 +829,7 @@ export default function App() {
     }
   }
 
-  async function sairDaConta(forcar = false) {
+  async function sairDaConta(forcar = false, limparSessaoSalva = true) {
     desejaFicarOnlineRef.current = false;
 
     if (online && !forcar) {
@@ -704,6 +846,10 @@ export default function App() {
     onlineRef.current = false;
     motoristaLogadoRef.current = null;
     tokenSessaoRef.current = null;
+
+    if (limparSessaoSalva) {
+      await limparSessaoMotoristaSalva();
+    }
 
     setOnline(false);
     setLocalizacao(null);
@@ -851,6 +997,7 @@ export default function App() {
 
           onlineRef.current = true;
           setOnline(true);
+          await salvarSessaoMotorista({ desejaOnline: true });
         }
       );
     } catch (error) {
@@ -937,6 +1084,7 @@ export default function App() {
 
           onlineRef.current = true;
           setOnline(true);
+          await salvarSessaoMotorista({ desejaOnline: true });
         }
       );
     } else {
@@ -961,6 +1109,7 @@ export default function App() {
       }
 
       setModoLocalizacao("economico");
+      await salvarSessaoMotorista({ desejaOnline: false });
     }
   }
 
@@ -1098,6 +1247,16 @@ export default function App() {
         "Nao foi possivel abrir o aplicativo de mapas neste celular."
       );
     }
+  }
+
+  if (restaurandoSessao && !motoristaLogado) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <Text style={styles.titulo}>Cornelio Move</Text>
+        <Text style={styles.subtitulo}>Restaurando sessao do motorista...</Text>
+      </View>
+    );
   }
 
   if (!motoristaLogado) {

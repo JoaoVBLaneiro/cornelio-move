@@ -10,9 +10,11 @@ import {
   View,
 } from "react-native";
 import * as Location from "expo-location";
+import * as SecureStore from "expo-secure-store";
 import { io } from "socket.io-client";
 
 const BACKEND_URL = (process.env.EXPO_PUBLIC_BACKEND_URL || "http://207.180.245.177:3001").replace(/\/$/, "");
+const STORAGE_PASSAGEIRO = "cornelio_move_passageiro_sessao_v1";
 
 function normalizarCelular(valor) {
   return String(valor || "").replace(/\D/g, "");
@@ -20,6 +22,9 @@ function normalizarCelular(valor) {
 
 export default function App() {
   const socketRef = useRef(null);
+  const passageiroRef = useRef(null);
+  const tokenSessaoRef = useRef(null);
+  const restaurandoAuthRef = useRef(false);
 
   const [conectado, setConectado] = useState(false);
   const [buscando, setBuscando] = useState(false);
@@ -36,6 +41,136 @@ export default function App() {
   const [celular, setCelular] = useState("");
   const [senha, setSenha] = useState("");
   const [authCarregando, setAuthCarregando] = useState(false);
+  const [restaurandoSessao, setRestaurandoSessao] = useState(true);
+
+
+  async function salvarSessaoPassageiro(opcoes = {}) {
+    try {
+      const celularAtual = String(opcoes.celular || celular || passageiroRef.current?.celular || "").replace(/\D/g, "");
+      const senhaAtual = String(
+        Object.prototype.hasOwnProperty.call(opcoes, "senha") ? opcoes.senha : senha
+      );
+      const passageiroAtual = opcoes.passageiro || passageiroRef.current || passageiro;
+      const tokenAtual = opcoes.tokenSessao || tokenSessaoRef.current || tokenSessao;
+
+      if (!celularAtual || !senhaAtual) {
+        return;
+      }
+
+      await SecureStore.setItemAsync(
+        STORAGE_PASSAGEIRO,
+        JSON.stringify({
+          celular: celularAtual,
+          senha: senhaAtual,
+          passageiro: passageiroAtual || null,
+          tokenSessao: tokenAtual || null,
+          salvoEm: new Date().toISOString(),
+        })
+      );
+    } catch (error) {
+      console.log("Erro ao salvar sessao do passageiro:", error.message);
+    }
+  }
+
+  async function limparSessaoPassageiroSalva() {
+    try {
+      await SecureStore.deleteItemAsync(STORAGE_PASSAGEIRO);
+    } catch (error) {
+      console.log("Erro ao limpar sessao do passageiro:", error.message);
+    }
+  }
+
+  async function loginPassageiroComCredenciaisSalvas(celularSalvo, senhaSalva, motivo = "auto") {
+    const celularLimpo = normalizarCelular(celularSalvo);
+    const senhaLimpa = String(senhaSalva || "");
+
+    if (!celularLimpo || !senhaLimpa) {
+      return null;
+    }
+
+    const resposta = await fetch(BACKEND_URL + "/auth/login-passageiro", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        celular: celularLimpo,
+        senha: senhaLimpa,
+      }),
+    });
+
+    const dados = await resposta.json().catch(() => null);
+
+    if (!resposta.ok || !dados?.ok) {
+      throw new Error(dados?.mensagem || "Nao foi possivel restaurar login do passageiro.");
+    }
+
+    passageiroRef.current = dados.passageiro;
+    tokenSessaoRef.current = dados.tokenSessao;
+
+    setCelular(celularLimpo);
+    setPassageiro(dados.passageiro);
+    setTokenSessao(dados.tokenSessao);
+    setStatus("Pronto. Voce ja pode chamar um mototaxi.");
+
+    await salvarSessaoPassageiro({
+      celular: celularLimpo,
+      senha: senhaLimpa,
+      passageiro: dados.passageiro,
+      tokenSessao: dados.tokenSessao,
+    });
+
+    console.log("Login do passageiro restaurado:", motivo);
+
+    return dados;
+  }
+
+  async function restaurarSessaoPassageiroSalva(motivo = "abertura_app") {
+    if (restaurandoAuthRef.current) {
+      return;
+    }
+
+    try {
+      restaurandoAuthRef.current = true;
+      setRestaurandoSessao(true);
+
+      const bruto = await SecureStore.getItemAsync(STORAGE_PASSAGEIRO);
+
+      if (!bruto) {
+        return;
+      }
+
+      const sessao = JSON.parse(bruto);
+      const celularSalvo = normalizarCelular(sessao.celular);
+      const senhaSalva = String(sessao.senha || "");
+
+      if (!celularSalvo || !senhaSalva) {
+        await limparSessaoPassageiroSalva();
+        return;
+      }
+
+      setCelular(celularSalvo);
+
+      await loginPassageiroComCredenciaisSalvas(celularSalvo, senhaSalva, motivo);
+    } catch (error) {
+      console.log("Nao foi possivel restaurar sessao do passageiro:", error.message);
+    } finally {
+      restaurandoAuthRef.current = false;
+      setRestaurandoSessao(false);
+    }
+  }
+
+  useEffect(() => {
+    passageiroRef.current = passageiro;
+  }, [passageiro]);
+
+  useEffect(() => {
+    tokenSessaoRef.current = tokenSessao;
+  }, [tokenSessao]);
+
+  useEffect(() => {
+    restaurarSessaoPassageiroSalva("inicio_app");
+  }, []);
 
   useEffect(() => {
     if (!passageiro || !tokenSessao) {
@@ -57,7 +192,7 @@ export default function App() {
       console.log("Passageiro desconectado");
     });
 
-    socketRef.current.on("status_chamada", (dados) => {
+    socketRef.current.on("status_chamada", async (dados) => {
       setStatus(dados.mensagem || "Atualizacao da chamada.");
 
       if (
@@ -70,8 +205,9 @@ export default function App() {
         setChamadaAtual(null);
 
         if (dados.status === "auth_erro") {
-          Alert.alert("Login necessario", dados.mensagem || "Faca login novamente.");
-          sairDaConta();
+          console.log("Sessao do passageiro invalida, tentando relogar automaticamente:", dados?.mensagem);
+          await sairDaConta(false);
+          await restaurarSessaoPassageiroSalva("auth_erro");
         }
       }
     });
@@ -159,9 +295,17 @@ export default function App() {
         return;
       }
 
+      passageiroRef.current = dados.passageiro;
+      tokenSessaoRef.current = dados.tokenSessao;
       setPassageiro(dados.passageiro);
       setTokenSessao(dados.tokenSessao);
       setStatus("Pronto. Voce ja pode chamar um mototaxi.");
+      await salvarSessaoPassageiro({
+        celular: celularLimpo,
+        senha: senhaLimpa,
+        passageiro: dados.passageiro,
+        tokenSessao: dados.tokenSessao,
+      });
       setSenha("");
     } catch (error) {
       Alert.alert("Erro", "Falha de conexao: " + error.message);
@@ -170,10 +314,14 @@ export default function App() {
     }
   }
 
-  function sairDaConta() {
+  async function sairDaConta(limparSessaoSalva = true) {
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current = null;
+    }
+
+    if (limparSessaoSalva) {
+      await limparSessaoPassageiroSalva();
     }
 
     setConectado(false);
@@ -182,6 +330,8 @@ export default function App() {
     setLocalizacao(null);
     setMotoristaAceitou(null);
     setChamadaAtual(null);
+    passageiroRef.current = null;
+    tokenSessaoRef.current = null;
     setPassageiro(null);
     setTokenSessao(null);
   }
@@ -301,6 +451,16 @@ export default function App() {
         onPress: executarCancelarCorrida,
       },
     ]);
+  }
+
+  if (restaurandoSessao && !passageiro) {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <Text style={styles.titulo}>Cornelio Move</Text>
+        <Text style={styles.subtitulo}>Restaurando sessao do passageiro...</Text>
+      </ScrollView>
+    );
   }
 
   if (!passageiro) {
