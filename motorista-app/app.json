@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cornelio Move Motorista",
     "slug": "motorista-app",
-    "version": "1.0.108",
+    "version": "1.0.109",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
@@ -10,7 +10,7 @@
     ],
     "android": {
       "package": "com.corneliomove.motorista",
-      "versionCode": 108,
+      "versionCode": 109,
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_FINE_LOCATION",
@@ -39,7 +39,8 @@
       ],
       "expo-notifications",
       "@react-native-firebase/app",
-      "@react-native-firebase/messaging"
+      "@react-native-firebase/messaging",
+      "expo-secure-store"
     ],
     "extra": {
       "eas": {

@@ -909,13 +909,13 @@ export default function App() {
       modo === "alta_precisao"
         ? {
             accuracy: Location.Accuracy.High,
-            timeInterval: 10000,
-            distanceInterval: 30,
+            timeInterval: 2500,
+            distanceInterval: 5,
           }
         : {
-            accuracy: Location.Accuracy.Balanced,
-            timeInterval: 30000,
-            distanceInterval: 100,
+            accuracy: Location.Accuracy.High,
+            timeInterval: 8000,
+            distanceInterval: 20,
           };
 
     const watcher = await Location.watchPositionAsync(configuracao, (posicao) => {
