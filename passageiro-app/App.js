@@ -9,12 +9,139 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { WebView } from "react-native-webview";
 import * as Location from "expo-location";
 import * as SecureStore from "expo-secure-store";
 import { io } from "socket.io-client";
 
 const BACKEND_URL = (process.env.EXPO_PUBLIC_BACKEND_URL || "http://207.180.245.177:3001").replace(/\/$/, "");
 const STORAGE_PASSAGEIRO = "cornelio_move_passageiro_sessao_v1";
+
+function coordenadaValida(valor) {
+  const numero = Number(valor);
+  return Number.isFinite(numero) && Math.abs(numero) > 0.000001;
+}
+
+function montarPontoMapa(origem) {
+  if (!origem) {
+    return null;
+  }
+
+  const latitude = Number(origem.latitude);
+  const longitude = Number(origem.longitude);
+
+  if (!coordenadaValida(latitude) || !coordenadaValida(longitude)) {
+    return null;
+  }
+
+  return {
+    latitude,
+    longitude,
+    accuracy: origem.accuracy ? Number(origem.accuracy) : null,
+  };
+}
+
+function gerarMapaHtmlPassageiro(localizacao, motoristaMapa, nomeMotorista) {
+  const passageiro = montarPontoMapa(localizacao);
+  const motorista = montarPontoMapa(motoristaMapa);
+  const centro = passageiro || motorista || { latitude: -23.1813, longitude: -50.6460 };
+
+  const dados = JSON.stringify({
+    centro,
+    passageiro,
+    motorista,
+    nomeMotorista: nomeMotorista || motoristaMapa?.nomeMotorista || "Mototaxista",
+  });
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body, #map {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      background: #dbe4e8;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    .leaflet-control-attribution { display: none; }
+    .rotulo {
+      border: 0;
+      border-radius: 999px;
+      background: rgba(17, 24, 39, 0.88);
+      color: #fff;
+      padding: 4px 8px;
+      font-size: 12px;
+      font-weight: bold;
+      box-shadow: 0 6px 14px rgba(0,0,0,0.18);
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const dados = ${dados};
+    const map = L.map('map', {
+      zoomControl: false,
+      attributionControl: false,
+      dragging: true,
+      tap: true
+    }).setView([dados.centro.latitude, dados.centro.longitude], dados.passageiro ? 16 : 14);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19
+    }).addTo(map);
+
+    const pontos = [];
+
+    if (dados.passageiro) {
+      const p = [dados.passageiro.latitude, dados.passageiro.longitude];
+      pontos.push(p);
+      L.circleMarker(p, {
+        radius: 9,
+        color: '#0f172a',
+        weight: 3,
+        fillColor: '#22c55e',
+        fillOpacity: 1
+      }).addTo(map).bindTooltip('Voce', { permanent: true, direction: 'top', className: 'rotulo' });
+
+      if (dados.passageiro.accuracy) {
+        L.circle(p, {
+          radius: Math.max(10, Math.min(Number(dados.passageiro.accuracy), 120)),
+          color: '#22c55e',
+          weight: 1,
+          fillColor: '#22c55e',
+          fillOpacity: 0.08
+        }).addTo(map);
+      }
+    }
+
+    if (dados.motorista) {
+      const m = [dados.motorista.latitude, dados.motorista.longitude];
+      pontos.push(m);
+      L.circleMarker(m, {
+        radius: 10,
+        color: '#0f172a',
+        weight: 3,
+        fillColor: '#facc15',
+        fillOpacity: 1
+      }).addTo(map).bindTooltip(dados.nomeMotorista || 'Mototaxista', { permanent: true, direction: 'top', className: 'rotulo' });
+    }
+
+    if (pontos.length >= 2) {
+      L.polyline(pontos, { color: '#111827', weight: 4, opacity: 0.65, dashArray: '8, 8' }).addTo(map);
+      map.fitBounds(pontos, { padding: [70, 70], maxZoom: 17 });
+    }
+  </script>
+</body>
+</html>`;
+}
 
 function normalizarCelular(valor) {
   return String(valor || "").replace(/\D/g, "");
@@ -42,6 +169,8 @@ export default function App() {
   const [senha, setSenha] = useState("");
   const [authCarregando, setAuthCarregando] = useState(false);
   const [restaurandoSessao, setRestaurandoSessao] = useState(true);
+  const [menuAberto, setMenuAberto] = useState(false);
+  const [motoristaMapa, setMotoristaMapa] = useState(null);
 
 
   async function salvarSessaoPassageiro(opcoes = {}) {
@@ -203,6 +332,7 @@ export default function App() {
         setBuscando(false);
         setMotoristaAceitou(null);
         setChamadaAtual(null);
+        setMotoristaMapa(null);
 
         if (dados.status === "auth_erro") {
           console.log("Sessao do passageiro invalida, tentando relogar automaticamente:", dados?.mensagem);
@@ -217,9 +347,28 @@ export default function App() {
       setChamadaAtual({
         idChamada: dados.idChamada,
         nomeMotorista: dados.nomeMotorista,
+        idMotorista: dados.idMotorista,
       });
       setStatus(dados.mensagem || `${dados.nomeMotorista} aceitou sua chamada.`);
       setBuscando(false);
+    });
+
+    socketRef.current.on("motorista_localizacao_passageiro", (dados) => {
+      setChamadaAtual((atual) => {
+        if (!atual || String(atual.idChamada) !== String(dados.idChamada || atual.idChamada)) {
+          return atual;
+        }
+
+        setMotoristaMapa({
+          idMotorista: dados.idMotorista || atual.idMotorista,
+          nomeMotorista: dados.nomeMotorista || atual.nomeMotorista || motoristaAceitou || "Mototaxista",
+          latitude: dados.latitude,
+          longitude: dados.longitude,
+          accuracy: dados.accuracy,
+        });
+
+        return atual;
+      });
     });
 
     socketRef.current.on("corrida_finalizada_passageiro", (dados) => {
@@ -227,6 +376,7 @@ export default function App() {
       setBuscando(false);
       setMotoristaAceitou(null);
       setChamadaAtual(null);
+      setMotoristaMapa(null);
     });
 
     socketRef.current.on("corrida_cancelada_passageiro", (dados) => {
@@ -234,6 +384,7 @@ export default function App() {
       setBuscando(false);
       setMotoristaAceitou(null);
       setChamadaAtual(null);
+      setMotoristaMapa(null);
       Alert.alert("Corrida cancelada", dados.mensagem || "Corrida cancelada.");
     });
 
@@ -244,6 +395,63 @@ export default function App() {
       }
     };
   }, [passageiro, tokenSessao]);
+
+  useEffect(() => {
+    if (!chamadaAtual || !chamadaAtual.idChamada) {
+      setMotoristaMapa(null);
+      return;
+    }
+
+    let ativo = true;
+
+    async function buscarMotoristaDaCorrida() {
+      try {
+        const resposta = await fetch(BACKEND_URL + "/admin/corridas-ativas");
+        const dados = await resposta.json().catch(() => null);
+
+        if (!ativo || !dados?.ok || !Array.isArray(dados.corridas)) {
+          return;
+        }
+
+        const corrida = dados.corridas.find((item) =>
+          String(item.idChamada) === String(chamadaAtual.idChamada)
+        );
+
+        const motorista = corrida?.motorista;
+
+        if (!motorista) {
+          return;
+        }
+
+        const latitude = Number(motorista.latitude);
+        const longitude = Number(motorista.longitude);
+
+        if (!coordenadaValida(latitude) || !coordenadaValida(longitude)) {
+          return;
+        }
+
+        setMotoristaMapa({
+          idMotorista: motorista.idMotorista || chamadaAtual.idMotorista,
+          nomeMotorista: motorista.nomeMotorista || chamadaAtual.nomeMotorista || motoristaAceitou || "Mototaxista",
+          latitude,
+          longitude,
+          online: motorista.online,
+          statusOperacional: motorista.statusOperacional,
+        });
+      } catch (error) {
+        console.log("Erro ao buscar motorista no mapa:", error.message);
+      }
+    }
+
+    buscarMotoristaDaCorrida();
+
+    const intervalo = setInterval(buscarMotoristaDaCorrida, 4000);
+
+    return () => {
+      ativo = false;
+      clearInterval(intervalo);
+    };
+  }, [chamadaAtual?.idChamada, motoristaAceitou]);
 
   async function enviarAuth(tipo) {
     const celularLimpo = normalizarCelular(celular);
@@ -376,6 +584,7 @@ export default function App() {
 
     setMotoristaAceitou(null);
     setChamadaAtual(null);
+    setMotoristaMapa(null);
     setBuscando(true);
     setStatus("Pegando sua localizacao...");
 
@@ -533,76 +742,84 @@ export default function App() {
     );
   }
 
+  const mapaHtml = gerarMapaHtmlPassageiro(localizacao, motoristaMapa, motoristaAceitou);
+  const chaveMapa = [
+    localizacao?.latitude,
+    localizacao?.longitude,
+    motoristaMapa?.latitude,
+    motoristaMapa?.longitude,
+    chamadaAtual?.idChamada || "sem-corrida",
+  ].join("-");
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <StatusBar barStyle="light-content" />
+    <View style={styles.telaMapa}>
+      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
 
-      <Text style={styles.titulo}>Cornelio Move</Text>
-      <Text style={styles.subtitulo}>App do Passageiro</Text>
+      <WebView
+        key={chaveMapa}
+        originWhitelist={["*"]}
+        source={{ html: mapaHtml }}
+        style={styles.mapaWebView}
+        javaScriptEnabled
+        domStorageEnabled
+        mixedContentMode="always"
+        showsHorizontalScrollIndicator={false}
+        showsVerticalScrollIndicator={false}
+      />
 
-      <View style={styles.cardConexao}>
-        <Text style={styles.label}>Conta</Text>
-        <Text style={styles.nomePassageiro}>{passageiro.nome}</Text>
-        <Text style={styles.celularPassageiro}>{passageiro.celular}</Text>
+      <TouchableOpacity style={styles.botaoMenuMapa} onPress={() => setMenuAberto((valor) => !valor)}>
+        <Text style={styles.textoMenuMapa}>☰</Text>
+      </TouchableOpacity>
 
-        <TouchableOpacity style={styles.botaoSair} onPress={sairDaConta}>
-          <Text style={styles.textoBotaoSair}>Sair da conta</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.cardConexao}>
-        <Text style={styles.label}>Conexao</Text>
-        <Text style={conectado ? styles.conectado : styles.desconectado}>
-          {conectado ? "CONECTADO" : "DESCONECTADO"}
-        </Text>
-      </View>
-
-      <View style={styles.cardPrincipal}>
-        <Text style={styles.textoInstrucao}>
-          Aperte o botao abaixo e o app vai chamar o mototaxista mais proximo da sua localizacao.
-        </Text>
-
-        <TouchableOpacity
-          style={buscando ? styles.botaoBuscando : styles.botaoChamar}
-          onPress={chamarMototaxi}
-          disabled={buscando}
-        >
-          <Text style={styles.textoBotao}>
-            {buscando ? "BUSCANDO..." : "CHAMAR MOTOTAXI"}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.cardStatus}>
-        <Text style={styles.label}>Status da chamada</Text>
-        <Text style={styles.status}>{status}</Text>
-
-        {motoristaAceitou && (
-          <>
-            <Text style={styles.motorista}>Mototaxista: {motoristaAceitou}</Text>
-
-            <TouchableOpacity style={styles.botaoCancelar} onPress={cancelarCorrida}>
-              <Text style={styles.textoBotaoCancelar}>Cancelar corrida</Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
-
-      {localizacao && (
-        <View style={styles.cardLocalizacao}>
-          <Text style={styles.label}>Sua localizacao</Text>
-          <Text style={styles.localizacaoTexto}>
-            Lat: {localizacao.latitude.toFixed(6)}
-          </Text>
-          <Text style={styles.localizacaoTexto}>
-            Lng: {localizacao.longitude.toFixed(6)}
-          </Text>
-          <Text style={styles.localizacaoTexto}>
-            Precisao: {Math.round(localizacao.accuracy)} m
-          </Text>
+      {menuAberto && (
+        <View style={styles.menuFlutuante}>
+          <Text style={styles.menuTitulo}>{passageiro.nome}</Text>
+          <Text style={styles.menuSubtitulo}>{passageiro.celular}</Text>
+          <TouchableOpacity
+            style={styles.botaoSairMenu}
+            onPress={() => {
+              setMenuAberto(false);
+              sairDaConta();
+            }}
+          >
+            <Text style={styles.textoBotaoSairMenu}>Sair da conta</Text>
+          </TouchableOpacity>
         </View>
       )}
-    </ScrollView>
+
+      <View style={styles.painelInferiorMapa}>
+        <Text style={styles.nomeAppMapa}>Cornelio Move</Text>
+        <Text style={styles.statusMapa}>{status}</Text>
+
+        {motoristaAceitou && (
+          <View style={styles.caixaMotoristaMapa}>
+            <Text style={styles.labelMotoristaMapa}>Mototaxista</Text>
+            <Text style={styles.nomeMotoristaMapa}>{motoristaAceitou}</Text>
+            <Text style={styles.infoMotoristaMapa}>
+              {motoristaMapa ? "Localizacao do mototaxista no mapa" : "Aguardando localizacao do mototaxista..."}
+            </Text>
+          </View>
+        )}
+
+        {!motoristaAceitou && (
+          <TouchableOpacity
+            style={buscando ? styles.botaoBuscandoMapa : styles.botaoChamarMapa}
+            onPress={chamarMototaxi}
+            disabled={buscando}
+          >
+            <Text style={styles.textoBotaoMapa}>
+              {buscando ? "BUSCANDO..." : "CHAMAR MOTOTAXI"}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {motoristaAceitou && (
+          <TouchableOpacity style={styles.botaoCancelarMapa} onPress={cancelarCorrida}>
+            <Text style={styles.textoBotaoCancelarMapa}>Cancelar corrida</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
   );
 }
 
@@ -625,28 +842,11 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 24,
   },
-  cardConexao: {
-    backgroundColor: "#1f2937",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-  },
   cardPrincipal: {
     backgroundColor: "#1f2937",
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
-  },
-  cardStatus: {
-    backgroundColor: "#374151",
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-  },
-  cardLocalizacao: {
-    backgroundColor: "#1f2937",
-    borderRadius: 16,
-    padding: 16,
   },
   tituloCard: {
     color: "#ffffff",
@@ -665,50 +865,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#374151",
   },
-  label: {
-    color: "#94a3b8",
-    fontSize: 14,
-    textAlign: "center",
-    marginBottom: 8,
-  },
-  conectado: {
-    color: "#22c55e",
-    fontSize: 20,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  desconectado: {
-    color: "#ef4444",
-    fontSize: 20,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  nomePassageiro: {
-    color: "#ffffff",
-    fontSize: 22,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  celularPassageiro: {
-    color: "#cbd5e1",
-    fontSize: 16,
-    textAlign: "center",
-    marginTop: 4,
-  },
-  textoInstrucao: {
-    color: "#e5e7eb",
-    fontSize: 16,
-    textAlign: "center",
-    marginBottom: 20,
-    lineHeight: 22,
-  },
   botaoChamar: {
     backgroundColor: "#22c55e",
-    padding: 22,
-    borderRadius: 16,
-  },
-  botaoBuscando: {
-    backgroundColor: "#facc15",
     padding: 22,
     borderRadius: 16,
   },
@@ -728,47 +886,150 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     textAlign: "center",
   },
-  botaoSair: {
-    backgroundColor: "#4b5563",
-    padding: 12,
-    borderRadius: 12,
-    marginTop: 14,
+  telaMapa: {
+    flex: 1,
+    backgroundColor: "#dbe4e8",
   },
-  textoBotaoSair: {
+  mapaWebView: {
+    flex: 1,
+    backgroundColor: "#dbe4e8",
+  },
+  botaoMenuMapa: {
+    position: "absolute",
+    top: 44,
+    right: 20,
+    width: 58,
+    height: 50,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  textoMenuMapa: {
+    color: "#111827",
+    fontSize: 34,
+    fontWeight: "bold",
+    marginTop: -4,
+  },
+  menuFlutuante: {
+    position: "absolute",
+    top: 102,
+    right: 20,
+    width: 230,
+    backgroundColor: "rgba(17,24,39,0.96)",
+    borderRadius: 20,
+    padding: 16,
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  menuTitulo: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  menuSubtitulo: {
+    color: "#cbd5e1",
+    fontSize: 14,
+    marginTop: 3,
+    marginBottom: 14,
+  },
+  botaoSairMenu: {
+    backgroundColor: "#4b5563",
+    borderRadius: 12,
+    padding: 12,
+  },
+  textoBotaoSairMenu: {
     color: "#ffffff",
     fontSize: 15,
     fontWeight: "bold",
     textAlign: "center",
   },
-  status: {
-    color: "#ffffff",
+  painelInferiorMapa: {
+    position: "absolute",
+    left: 18,
+    right: 18,
+    bottom: 22,
+    backgroundColor: "rgba(255,255,255,0.96)",
+    borderRadius: 28,
+    padding: 18,
+    elevation: 12,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
+  },
+  nomeAppMapa: {
+    color: "#111827",
+    fontSize: 23,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 6,
+  },
+  statusMapa: {
+    color: "#4b5563",
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
+    lineHeight: 22,
+    marginBottom: 14,
+  },
+  botaoChamarMapa: {
+    backgroundColor: "#22c55e",
+    paddingVertical: 20,
+    borderRadius: 20,
+  },
+  botaoBuscandoMapa: {
+    backgroundColor: "#facc15",
+    paddingVertical: 20,
+    borderRadius: 20,
+  },
+  textoBotaoMapa: {
+    color: "#111827",
     fontSize: 20,
     fontWeight: "bold",
     textAlign: "center",
-    lineHeight: 28,
   },
-  motorista: {
-    color: "#22c55e",
-    fontSize: 18,
+  caixaMotoristaMapa: {
+    backgroundColor: "#f1f5f9",
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 12,
+  },
+  labelMotoristaMapa: {
+    color: "#64748b",
+    fontSize: 13,
+    textAlign: "center",
+    marginBottom: 3,
+  },
+  nomeMotoristaMapa: {
+    color: "#16a34a",
+    fontSize: 22,
     fontWeight: "bold",
     textAlign: "center",
-    marginTop: 14,
   },
-  botaoCancelar: {
+  infoMotoristaMapa: {
+    color: "#475569",
+    fontSize: 13,
+    textAlign: "center",
+    marginTop: 5,
+  },
+  botaoCancelarMapa: {
     backgroundColor: "#dc2626",
-    padding: 16,
-    borderRadius: 12,
-    marginTop: 16,
+    paddingVertical: 16,
+    borderRadius: 18,
   },
-  textoBotaoCancelar: {
+  textoBotaoCancelarMapa: {
     color: "#ffffff",
     fontSize: 18,
     fontWeight: "bold",
     textAlign: "center",
-  },
-  localizacaoTexto: {
-    color: "#cbd5e1",
-    textAlign: "center",
-    marginTop: 4,
   },
 });

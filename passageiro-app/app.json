@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cornelio Move Passageiro",
     "slug": "cornelio-move-passageiro",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -21,7 +21,7 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "versionCode": 4,
+      "versionCode": 5,
       "package": "com.corneliomove.passageiro",
       "usesCleartextTraffic": true
     },
@@ -37,7 +37,8 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "expo-secure-store"
     ]
   }
 }
