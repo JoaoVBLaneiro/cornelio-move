@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
-  Modal,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -12,178 +11,17 @@ import {
 } from "react-native";
 import * as Location from "expo-location";
 import * as SecureStore from "expo-secure-store";
-import { WebView } from "react-native-webview";
 import { io } from "socket.io-client";
 
 const BACKEND_URL = (process.env.EXPO_PUBLIC_BACKEND_URL || "http://207.180.245.177:3001").replace(/\/$/, "");
 const STORAGE_PASSAGEIRO = "cornelio_move_passageiro_sessao_v1";
 
-const MAPA_HTML = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
-  />
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
-  <style>
-    html, body, #map {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      background: #e5e7eb;
-      overflow: hidden;
-      font-family: Arial, sans-serif;
-    }
-
-    .pin {
-      min-width: 68px;
-      transform: translate(-50%, -100%);
-      border-radius: 999px;
-      padding: 8px 10px;
-      color: #ffffff;
-      font-size: 12px;
-      font-weight: bold;
-      text-align: center;
-      box-shadow: 0 8px 18px rgba(0,0,0,0.25);
-      border: 2px solid #ffffff;
-      white-space: nowrap;
-    }
-
-    .pin-passageiro {
-      background: #2563eb;
-    }
-
-    .pin-motorista {
-      background: #16a34a;
-    }
-
-    .leaflet-control-attribution {
-      font-size: 10px;
-    }
-  </style>
-</head>
-<body>
-  <div id="map"></div>
-
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script>
-    const CENTRO_PADRAO = [-23.1829, -50.6465];
-
-    const mapa = L.map("map", {
-      zoomControl: false,
-      attributionControl: true
-    }).setView(CENTRO_PADRAO, 15);
-
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "© OpenStreetMap"
-    }).addTo(mapa);
-
-    let marcadorPassageiro = null;
-    let marcadorMotorista = null;
-
-    function numero(valor) {
-      const n = Number(valor);
-      return Number.isFinite(n) ? n : null;
-    }
-
-    function criarIcone(classe, texto) {
-      return L.divIcon({
-        className: "",
-        html: '<div class="pin ' + classe + '">' + texto + '</div>',
-        iconSize: [1, 1],
-        iconAnchor: [0, 0]
-      });
-    }
-
-    function atualizarMarcador(atual, coords, classe, texto) {
-      const lat = numero(coords && coords.latitude);
-      const lng = numero(coords && coords.longitude);
-
-      if (lat === null || lng === null) {
-        if (atual) {
-          mapa.removeLayer(atual);
-        }
-        return null;
-      }
-
-      if (!atual) {
-        return L.marker([lat, lng], {
-          icon: criarIcone(classe, texto)
-        }).addTo(mapa);
-      }
-
-      atual.setLatLng([lat, lng]);
-      return atual;
-    }
-
-    function atualizarMapa(dados) {
-      try {
-        dados = dados || {};
-
-        marcadorPassageiro = atualizarMarcador(
-          marcadorPassageiro,
-          dados.passageiro,
-          "pin-passageiro",
-          "Você"
-        );
-
-        marcadorMotorista = atualizarMarcador(
-          marcadorMotorista,
-          dados.motorista,
-          "pin-motorista",
-          "Mototáxi"
-        );
-
-        const pontos = [];
-
-        if (marcadorPassageiro) {
-          pontos.push(marcadorPassageiro.getLatLng());
-        }
-
-        if (marcadorMotorista) {
-          pontos.push(marcadorMotorista.getLatLng());
-        }
-
-        if (pontos.length >= 2) {
-          mapa.fitBounds(L.latLngBounds(pontos), {
-            padding: [80, 80],
-            maxZoom: 16
-          });
-        } else if (pontos.length === 1) {
-          mapa.setView(pontos[0], 16);
-        }
-      } catch (erro) {
-        console.log("Erro ao atualizar mapa:", erro && erro.message);
-      }
-    }
-
-    window.atualizarMapa = atualizarMapa;
-  </script>
-</body>
-</html>`;
-
 function normalizarCelular(valor) {
   return String(valor || "").replace(/\D/g, "");
 }
 
-function coordenadaValida(coords) {
-  return (
-    coords &&
-    Number.isFinite(Number(coords.latitude)) &&
-    Number.isFinite(Number(coords.longitude))
-  );
-}
-
 export default function App() {
   const socketRef = useRef(null);
-  const mapaRef = useRef(null);
   const passageiroRef = useRef(null);
   const tokenSessaoRef = useRef(null);
   const restaurandoAuthRef = useRef(false);
@@ -193,10 +31,7 @@ export default function App() {
   const [status, setStatus] = useState("Faca login para chamar um mototaxi.");
   const [localizacao, setLocalizacao] = useState(null);
   const [motoristaAceitou, setMotoristaAceitou] = useState(null);
-  const [motoristaLocalizacao, setMotoristaLocalizacao] = useState(null);
   const [chamadaAtual, setChamadaAtual] = useState(null);
-  const [mapaPronto, setMapaPronto] = useState(false);
-  const [menuAberto, setMenuAberto] = useState(false);
 
   const [modoAuth, setModoAuth] = useState("login");
   const [passageiro, setPassageiro] = useState(null);
@@ -208,36 +43,6 @@ export default function App() {
   const [authCarregando, setAuthCarregando] = useState(false);
   const [restaurandoSessao, setRestaurandoSessao] = useState(true);
 
-  function atualizarMapaWebView(proximaLocalizacao = localizacao, proximoMotorista = motoristaLocalizacao) {
-    if (!mapaPronto || !mapaRef.current) {
-      return;
-    }
-
-    const dadosMapa = {
-      passageiro: coordenadaValida(proximaLocalizacao)
-        ? {
-            latitude: Number(proximaLocalizacao.latitude),
-            longitude: Number(proximaLocalizacao.longitude),
-            accuracy: proximaLocalizacao.accuracy || "",
-          }
-        : null,
-      motorista: coordenadaValida(proximoMotorista)
-        ? {
-            latitude: Number(proximoMotorista.latitude),
-            longitude: Number(proximoMotorista.longitude),
-            accuracy: proximoMotorista.accuracy || "",
-          }
-        : null,
-    };
-
-    mapaRef.current.injectJavaScript(
-      `window.atualizarMapa(${JSON.stringify(dadosMapa)}); true;`
-    );
-  }
-
-  useEffect(() => {
-    atualizarMapaWebView();
-  }, [mapaPronto, localizacao, motoristaLocalizacao]);
 
   async function salvarSessaoPassageiro(opcoes = {}) {
     try {
@@ -372,14 +177,6 @@ export default function App() {
       return;
     }
 
-    pegarLocalizacao(false);
-  }, [passageiro?.idPassageiro, tokenSessao]);
-
-  useEffect(() => {
-    if (!passageiro || !tokenSessao) {
-      return;
-    }
-
     socketRef.current = io(BACKEND_URL, {
       transports: ["websocket"],
       reconnection: true,
@@ -405,7 +202,6 @@ export default function App() {
       ) {
         setBuscando(false);
         setMotoristaAceitou(null);
-        setMotoristaLocalizacao(null);
         setChamadaAtual(null);
 
         if (dados.status === "auth_erro") {
@@ -421,52 +217,15 @@ export default function App() {
       setChamadaAtual({
         idChamada: dados.idChamada,
         nomeMotorista: dados.nomeMotorista,
-        idMotorista: dados.idMotorista,
       });
-
-      if (coordenadaValida({
-        latitude: dados.latitudeMotorista,
-        longitude: dados.longitudeMotorista,
-      })) {
-        setMotoristaLocalizacao({
-          latitude: Number(dados.latitudeMotorista),
-          longitude: Number(dados.longitudeMotorista),
-          accuracy: dados.accuracyMotorista || "",
-          idMotorista: dados.idMotorista,
-          nomeMotorista: dados.nomeMotorista,
-        });
-      }
-
       setStatus(dados.mensagem || `${dados.nomeMotorista} aceitou sua chamada.`);
       setBuscando(false);
-    });
-
-    socketRef.current.on("motorista_localizacao_passageiro", (dados) => {
-      const idAtual = String(chamadaAtual?.idChamada || "");
-      const idRecebido = String(dados?.idChamada || "");
-
-      if (idAtual && idRecebido && idAtual !== idRecebido) {
-        return;
-      }
-
-      if (!coordenadaValida(dados)) {
-        return;
-      }
-
-      setMotoristaLocalizacao({
-        latitude: Number(dados.latitude),
-        longitude: Number(dados.longitude),
-        accuracy: dados.accuracy || "",
-        idMotorista: dados.idMotorista || "",
-        nomeMotorista: dados.nomeMotorista || motoristaAceitou || "Mototaxista",
-      });
     });
 
     socketRef.current.on("corrida_finalizada_passageiro", (dados) => {
       setStatus(dados.mensagem || "Corrida finalizada.");
       setBuscando(false);
       setMotoristaAceitou(null);
-      setMotoristaLocalizacao(null);
       setChamadaAtual(null);
     });
 
@@ -474,7 +233,6 @@ export default function App() {
       setStatus(dados.mensagem || "Corrida cancelada.");
       setBuscando(false);
       setMotoristaAceitou(null);
-      setMotoristaLocalizacao(null);
       setChamadaAtual(null);
       Alert.alert("Corrida cancelada", dados.mensagem || "Corrida cancelada.");
     });
@@ -485,7 +243,7 @@ export default function App() {
         socketRef.current = null;
       }
     };
-  }, [passageiro, tokenSessao, chamadaAtual?.idChamada, motoristaAceitou]);
+  }, [passageiro, tokenSessao]);
 
   async function enviarAuth(tipo) {
     const celularLimpo = normalizarCelular(celular);
@@ -571,24 +329,19 @@ export default function App() {
     setStatus("Faca login para chamar um mototaxi.");
     setLocalizacao(null);
     setMotoristaAceitou(null);
-    setMotoristaLocalizacao(null);
     setChamadaAtual(null);
-    setMenuAberto(false);
     passageiroRef.current = null;
     tokenSessaoRef.current = null;
     setPassageiro(null);
     setTokenSessao(null);
   }
 
-  async function pegarLocalizacao(mostrarAlerta = true) {
+  async function pegarLocalizacao() {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
 
       if (status !== "granted") {
-        if (mostrarAlerta) {
-          Alert.alert("Permissao negada", "Nao foi possivel acessar sua localizacao.");
-        }
-
+        Alert.alert("Permissao negada", "Nao foi possivel acessar sua localizacao.");
         return null;
       }
 
@@ -603,14 +356,9 @@ export default function App() {
       };
 
       setLocalizacao(coords);
-      atualizarMapaWebView(coords, motoristaLocalizacao);
-
       return coords;
     } catch (error) {
-      if (mostrarAlerta) {
-        Alert.alert("Erro", "Erro ao pegar localizacao: " + error.message);
-      }
-
+      Alert.alert("Erro", "Erro ao pegar localizacao: " + error.message);
       return null;
     }
   }
@@ -627,7 +375,6 @@ export default function App() {
     }
 
     setMotoristaAceitou(null);
-    setMotoristaLocalizacao(null);
     setChamadaAtual(null);
     setBuscando(true);
     setStatus("Pegando sua localizacao...");
@@ -681,7 +428,6 @@ export default function App() {
         setStatus(resposta.mensagem || "Corrida cancelada por voce.");
         setBuscando(false);
         setMotoristaAceitou(null);
-        setMotoristaLocalizacao(null);
         setChamadaAtual(null);
         Alert.alert("Corrida cancelada", resposta.mensagem || "Corrida cancelada por voce.");
       }
@@ -709,7 +455,7 @@ export default function App() {
 
   if (restaurandoSessao && !passageiro) {
     return (
-      <ScrollView contentContainerStyle={styles.containerLogin}>
+      <ScrollView contentContainerStyle={styles.container}>
         <StatusBar barStyle="light-content" />
         <Text style={styles.titulo}>Cornelio Move</Text>
         <Text style={styles.subtitulo}>Restaurando sessao do passageiro...</Text>
@@ -719,7 +465,7 @@ export default function App() {
 
   if (!passageiro) {
     return (
-      <ScrollView contentContainerStyle={styles.containerLogin}>
+      <ScrollView contentContainerStyle={styles.container}>
         <StatusBar barStyle="light-content" />
 
         <Text style={styles.titulo}>Cornelio Move</Text>
@@ -788,257 +534,84 @@ export default function App() {
   }
 
   return (
-    <View style={styles.telaMapa}>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
+    <ScrollView contentContainerStyle={styles.container}>
+      <StatusBar barStyle="light-content" />
 
-      <WebView
-        ref={mapaRef}
-        style={styles.webviewMapa}
-        source={{ html: MAPA_HTML }}
-        originWhitelist={["*"]}
-        javaScriptEnabled
-        domStorageEnabled
-        mixedContentMode="always"
-        onLoadEnd={() => {
-          setMapaPronto(true);
-          setTimeout(() => atualizarMapaWebView(), 250);
-        }}
-      />
+      <Text style={styles.titulo}>Cornelio Move</Text>
+      <Text style={styles.subtitulo}>App do Passageiro</Text>
 
-      <View style={styles.topoMapa}>
-        <View style={styles.logoMini}>
-          <Text style={styles.logoMiniTexto}>Cornelio Move</Text>
-          <Text style={styles.logoMiniSubtexto}>{conectado ? "Conectado" : "Desconectado"}</Text>
-        </View>
+      <View style={styles.cardConexao}>
+        <Text style={styles.label}>Conta</Text>
+        <Text style={styles.nomePassageiro}>{passageiro.nome}</Text>
+        <Text style={styles.celularPassageiro}>{passageiro.celular}</Text>
 
-        <TouchableOpacity style={styles.botaoMenuMapa} onPress={() => setMenuAberto(true)}>
-          <Text style={styles.iconeMenu}>☰</Text>
+        <TouchableOpacity style={styles.botaoSair} onPress={sairDaConta}>
+          <Text style={styles.textoBotaoSair}>Sair da conta</Text>
         </TouchableOpacity>
       </View>
 
-      <View style={styles.painelInferior}>
-        <Text style={styles.statusMapa}>{status}</Text>
-
-        {motoristaAceitou && (
-          <Text style={styles.motoristaMapa}>Mototaxista: {motoristaAceitou}</Text>
-        )}
-
-        {!motoristaAceitou && (
-          <TouchableOpacity
-            style={buscando ? styles.botaoBuscandoMapa : styles.botaoChamarMapa}
-            onPress={chamarMototaxi}
-            disabled={buscando}
-          >
-            <Text style={styles.textoBotaoMapa}>
-              {buscando ? "BUSCANDO..." : "CHAMAR MOTOTAXI"}
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        {motoristaAceitou && (
-          <TouchableOpacity style={styles.botaoCancelarMapa} onPress={cancelarCorrida}>
-            <Text style={styles.textoBotaoCancelar}>Cancelar corrida</Text>
-          </TouchableOpacity>
-        )}
-
-        <TouchableOpacity style={styles.botaoAtualizarLocalizacao} onPress={() => pegarLocalizacao()}>
-          <Text style={styles.textoAtualizarLocalizacao}>Atualizar minha localização</Text>
-        </TouchableOpacity>
+      <View style={styles.cardConexao}>
+        <Text style={styles.label}>Conexao</Text>
+        <Text style={conectado ? styles.conectado : styles.desconectado}>
+          {conectado ? "CONECTADO" : "DESCONECTADO"}
+        </Text>
       </View>
 
-      <Modal
-        visible={menuAberto}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMenuAberto(false)}
-      >
+      <View style={styles.cardPrincipal}>
+        <Text style={styles.textoInstrucao}>
+          Aperte o botao abaixo e o app vai chamar o mototaxista mais proximo da sua localizacao.
+        </Text>
+
         <TouchableOpacity
-          style={styles.fundoModalMenu}
-          activeOpacity={1}
-          onPress={() => setMenuAberto(false)}
+          style={buscando ? styles.botaoBuscando : styles.botaoChamar}
+          onPress={chamarMototaxi}
+          disabled={buscando}
         >
-          <View style={styles.cardMenu}>
-            <Text style={styles.menuTitulo}>Minha conta</Text>
-            <Text style={styles.nomePassageiro}>{passageiro.nome}</Text>
-            <Text style={styles.celularPassageiro}>{passageiro.celular}</Text>
-
-            <View style={styles.divisorMenu} />
-
-            <Text style={styles.menuInfo}>
-              {conectado ? "Servidor conectado" : "Servidor desconectado"}
-            </Text>
-
-            <TouchableOpacity style={styles.botaoSair} onPress={() => sairDaConta(true)}>
-              <Text style={styles.textoBotaoSair}>Sair da conta</Text>
-            </TouchableOpacity>
-          </View>
+          <Text style={styles.textoBotao}>
+            {buscando ? "BUSCANDO..." : "CHAMAR MOTOTAXI"}
+          </Text>
         </TouchableOpacity>
-      </Modal>
-    </View>
+      </View>
+
+      <View style={styles.cardStatus}>
+        <Text style={styles.label}>Status da chamada</Text>
+        <Text style={styles.status}>{status}</Text>
+
+        {motoristaAceitou && (
+          <>
+            <Text style={styles.motorista}>Mototaxista: {motoristaAceitou}</Text>
+
+            <TouchableOpacity style={styles.botaoCancelar} onPress={cancelarCorrida}>
+              <Text style={styles.textoBotaoCancelar}>Cancelar corrida</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+
+      {localizacao && (
+        <View style={styles.cardLocalizacao}>
+          <Text style={styles.label}>Sua localizacao</Text>
+          <Text style={styles.localizacaoTexto}>
+            Lat: {localizacao.latitude.toFixed(6)}
+          </Text>
+          <Text style={styles.localizacaoTexto}>
+            Lng: {localizacao.longitude.toFixed(6)}
+          </Text>
+          <Text style={styles.localizacaoTexto}>
+            Precisao: {Math.round(localizacao.accuracy)} m
+          </Text>
+        </View>
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  containerLogin: {
+  container: {
     flexGrow: 1,
     backgroundColor: "#111827",
     padding: 20,
     justifyContent: "center",
-  },
-  telaMapa: {
-    flex: 1,
-    backgroundColor: "#e5e7eb",
-  },
-  webviewMapa: {
-    flex: 1,
-    backgroundColor: "#e5e7eb",
-  },
-  topoMapa: {
-    position: "absolute",
-    top: 44,
-    left: 16,
-    right: 16,
-    zIndex: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  logoMini: {
-    backgroundColor: "rgba(255,255,255,0.92)",
-    borderRadius: 18,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 5,
-  },
-  logoMiniTexto: {
-    color: "#111827",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  logoMiniSubtexto: {
-    color: "#64748b",
-    fontSize: 12,
-    marginTop: 2,
-  },
-  botaoMenuMapa: {
-    width: 54,
-    height: 54,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 5,
-  },
-  iconeMenu: {
-    color: "#111827",
-    fontSize: 34,
-    lineHeight: 38,
-    fontWeight: "bold",
-  },
-  painelInferior: {
-    position: "absolute",
-    left: 18,
-    right: 18,
-    bottom: 24,
-    zIndex: 10,
-    backgroundColor: "rgba(255,255,255,0.96)",
-    borderRadius: 28,
-    padding: 18,
-    shadowColor: "#000",
-    shadowOpacity: 0.22,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
-  },
-  statusMapa: {
-    color: "#334155",
-    fontSize: 16,
-    textAlign: "center",
-    lineHeight: 22,
-    marginBottom: 14,
-    fontWeight: "600",
-  },
-  motoristaMapa: {
-    color: "#16a34a",
-    fontSize: 18,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 14,
-  },
-  botaoChamarMapa: {
-    backgroundColor: "#22c55e",
-    padding: 20,
-    borderRadius: 18,
-  },
-  botaoBuscandoMapa: {
-    backgroundColor: "#facc15",
-    padding: 20,
-    borderRadius: 18,
-  },
-  textoBotaoMapa: {
-    color: "#111827",
-    fontSize: 20,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  botaoCancelarMapa: {
-    backgroundColor: "#dc2626",
-    padding: 16,
-    borderRadius: 16,
-  },
-  botaoAtualizarLocalizacao: {
-    marginTop: 12,
-    padding: 10,
-  },
-  textoAtualizarLocalizacao: {
-    color: "#2563eb",
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  fundoModalMenu: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.38)",
-    justifyContent: "flex-start",
-    alignItems: "flex-end",
-    paddingTop: 92,
-    paddingRight: 16,
-  },
-  cardMenu: {
-    width: 270,
-    backgroundColor: "#ffffff",
-    borderRadius: 22,
-    padding: 18,
-    shadowColor: "#000",
-    shadowOpacity: 0.24,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
-  },
-  menuTitulo: {
-    color: "#64748b",
-    fontSize: 13,
-    textTransform: "uppercase",
-    fontWeight: "bold",
-    marginBottom: 8,
-  },
-  menuInfo: {
-    color: "#475569",
-    fontSize: 14,
-    textAlign: "center",
-    marginBottom: 12,
-  },
-  divisorMenu: {
-    height: 1,
-    backgroundColor: "#e5e7eb",
-    marginVertical: 14,
   },
   titulo: {
     color: "#ffffff",
@@ -1052,11 +625,28 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 24,
   },
+  cardConexao: {
+    backgroundColor: "#1f2937",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
   cardPrincipal: {
     backgroundColor: "#1f2937",
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
+  },
+  cardStatus: {
+    backgroundColor: "#374151",
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+  },
+  cardLocalizacao: {
+    backgroundColor: "#1f2937",
+    borderRadius: 16,
+    padding: 16,
   },
   tituloCard: {
     color: "#ffffff",
@@ -1075,8 +665,50 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#374151",
   },
+  label: {
+    color: "#94a3b8",
+    fontSize: 14,
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  conectado: {
+    color: "#22c55e",
+    fontSize: 20,
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  desconectado: {
+    color: "#ef4444",
+    fontSize: 20,
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  nomePassageiro: {
+    color: "#ffffff",
+    fontSize: 22,
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  celularPassageiro: {
+    color: "#cbd5e1",
+    fontSize: 16,
+    textAlign: "center",
+    marginTop: 4,
+  },
+  textoInstrucao: {
+    color: "#e5e7eb",
+    fontSize: 16,
+    textAlign: "center",
+    marginBottom: 20,
+    lineHeight: 22,
+  },
   botaoChamar: {
     backgroundColor: "#22c55e",
+    padding: 22,
+    borderRadius: 16,
+  },
+  botaoBuscando: {
+    backgroundColor: "#facc15",
     padding: 22,
     borderRadius: 16,
   },
@@ -1096,23 +728,11 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     textAlign: "center",
   },
-  nomePassageiro: {
-    color: "#111827",
-    fontSize: 21,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  celularPassageiro: {
-    color: "#475569",
-    fontSize: 15,
-    textAlign: "center",
-    marginTop: 4,
-  },
   botaoSair: {
     backgroundColor: "#4b5563",
-    padding: 13,
-    borderRadius: 14,
-    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    marginTop: 14,
   },
   textoBotaoSair: {
     color: "#ffffff",
@@ -1120,10 +740,35 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     textAlign: "center",
   },
+  status: {
+    color: "#ffffff",
+    fontSize: 20,
+    fontWeight: "bold",
+    textAlign: "center",
+    lineHeight: 28,
+  },
+  motorista: {
+    color: "#22c55e",
+    fontSize: 18,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginTop: 14,
+  },
+  botaoCancelar: {
+    backgroundColor: "#dc2626",
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 16,
+  },
   textoBotaoCancelar: {
     color: "#ffffff",
     fontSize: 18,
     fontWeight: "bold",
     textAlign: "center",
+  },
+  localizacaoTexto: {
+    color: "#cbd5e1",
+    textAlign: "center",
+    marginTop: 4,
   },
 });
