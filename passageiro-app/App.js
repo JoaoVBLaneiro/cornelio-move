@@ -171,6 +171,7 @@ export default function App() {
   const [restaurandoSessao, setRestaurandoSessao] = useState(true);
   const [menuAberto, setMenuAberto] = useState(false);
   const [motoristaMapa, setMotoristaMapa] = useState(null);
+  const [cancelandoPedido, setCancelandoPedido] = useState(false);
 
 
   async function salvarSessaoPassageiro(opcoes = {}) {
@@ -325,6 +326,25 @@ export default function App() {
       setStatus(dados.mensagem || "Atualizacao da chamada.");
 
       if (
+        dados.idChamada &&
+        (
+          dados.status === "tentando_motorista" ||
+          dados.status === "motorista_nao_respondeu"
+        )
+      ) {
+        setChamadaAtual((atual) => atual?.idChamada ? atual : { idChamada: dados.idChamada });
+      }
+
+      if (dados.status === "pedido_cancelado") {
+        setBuscando(false);
+        setMotoristaAceitou(null);
+        setChamadaAtual(null);
+        setMotoristaMapa(null);
+        setCancelandoPedido(false);
+        return;
+      }
+
+      if (
         dados.status === "sem_motoristas" ||
         dados.status === "ninguem_atendeu" ||
         dados.status === "auth_erro"
@@ -333,6 +353,7 @@ export default function App() {
         setMotoristaAceitou(null);
         setChamadaAtual(null);
         setMotoristaMapa(null);
+        setCancelandoPedido(false);
 
         if (dados.status === "auth_erro") {
           console.log("Sessao do passageiro invalida, tentando relogar automaticamente:", dados?.mensagem);
@@ -351,6 +372,7 @@ export default function App() {
       });
       setStatus(dados.mensagem || `${dados.nomeMotorista} aceitou sua chamada.`);
       setBuscando(false);
+      setCancelandoPedido(false);
     });
 
     socketRef.current.on("motorista_localizacao_passageiro", (dados) => {
@@ -377,6 +399,7 @@ export default function App() {
       setMotoristaAceitou(null);
       setChamadaAtual(null);
       setMotoristaMapa(null);
+      setCancelandoPedido(false);
     });
 
     socketRef.current.on("corrida_cancelada_passageiro", (dados) => {
@@ -385,6 +408,7 @@ export default function App() {
       setMotoristaAceitou(null);
       setChamadaAtual(null);
       setMotoristaMapa(null);
+      setCancelandoPedido(false);
       Alert.alert("Corrida cancelada", dados.mensagem || "Corrida cancelada.");
     });
 
@@ -399,6 +423,7 @@ export default function App() {
   useEffect(() => {
     if (!chamadaAtual || !chamadaAtual.idChamada) {
       setMotoristaMapa(null);
+      setCancelandoPedido(false);
       return;
     }
 
@@ -585,6 +610,7 @@ export default function App() {
     setMotoristaAceitou(null);
     setChamadaAtual(null);
     setMotoristaMapa(null);
+    setCancelandoPedido(false);
     setBuscando(true);
     setStatus("Pegando sua localizacao...");
 
@@ -598,19 +624,96 @@ export default function App() {
 
     setStatus("Buscando mototaxista proximo...");
 
-    socketRef.current.emit("passageiro_chamar", {
-      tokenSessaoPassageiro: tokenSessao,
-      passageiro: {
-        idPassageiro: passageiro.idPassageiro,
+    socketRef.current.emit(
+      "passageiro_chamar",
+      {
+        tokenSessaoPassageiro: tokenSessao,
+        passageiro: {
+          idPassageiro: passageiro.idPassageiro,
+          nome: passageiro.nome,
+          celular: passageiro.celular,
+        },
         nome: passageiro.nome,
         celular: passageiro.celular,
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        accuracy: coords.accuracy,
       },
-      nome: passageiro.nome,
-      celular: passageiro.celular,
-      latitude: coords.latitude,
-      longitude: coords.longitude,
-      accuracy: coords.accuracy,
-    });
+      (resposta) => {
+        if (!resposta) {
+          return;
+        }
+
+        if (!resposta.ok) {
+          setBuscando(false);
+          setCancelandoPedido(false);
+          setStatus(resposta.mensagem || "Nao foi possivel chamar um mototaxista.");
+          Alert.alert("Nao foi possivel chamar", resposta.mensagem || "Tente novamente.");
+          return;
+        }
+
+        if (resposta.idChamada) {
+          setChamadaAtual((atual) => atual?.idChamada ? atual : { idChamada: resposta.idChamada });
+        }
+
+        setStatus(resposta.mensagem || "Buscando mototaxista proximo...");
+      }
+    );
+  }
+
+  function executarCancelarPedidoPendente() {
+    if (!chamadaAtual || !chamadaAtual.idChamada) {
+      setBuscando(false);
+      setStatus("Pedido cancelado antes de iniciar a busca.");
+      return;
+    }
+
+    if (!socketRef.current) {
+      Alert.alert("Sem conexao", "Nao foi possivel cancelar agora. O app esta desconectado.");
+      return;
+    }
+
+    setCancelandoPedido(true);
+    setStatus("Cancelando pedido...");
+
+    socketRef.current.emit(
+      "passageiro_cancelar_pedido",
+      {
+        idChamada: chamadaAtual.idChamada,
+        tokenSessaoPassageiro: tokenSessao,
+      },
+      (resposta) => {
+        setCancelandoPedido(false);
+
+        if (!resposta || !resposta.ok) {
+          Alert.alert(
+            "Nao foi possivel cancelar",
+            resposta?.mensagem || "Esse pedido nao esta mais disponivel."
+          );
+          return;
+        }
+
+        setStatus(resposta.mensagem || "Pedido cancelado por voce.");
+        setBuscando(false);
+        setMotoristaAceitou(null);
+        setChamadaAtual(null);
+        setMotoristaMapa(null);
+      }
+    );
+  }
+
+  function cancelarPedidoPendente() {
+    Alert.alert("Cancelar pedido", "Cancelar a busca por mototaxista?", [
+      {
+        text: "Nao",
+        style: "cancel",
+      },
+      {
+        text: "Sim, cancelar",
+        style: "destructive",
+        onPress: executarCancelarPedidoPendente,
+      },
+    ]);
   }
 
   function executarCancelarCorrida() {
@@ -801,16 +904,34 @@ export default function App() {
           </View>
         )}
 
-        {!motoristaAceitou && (
+        {!motoristaAceitou && !buscando && (
           <TouchableOpacity
-            style={buscando ? styles.botaoBuscandoMapa : styles.botaoChamarMapa}
+            style={styles.botaoChamarMapa}
             onPress={chamarMototaxi}
-            disabled={buscando}
           >
-            <Text style={styles.textoBotaoMapa}>
-              {buscando ? "BUSCANDO..." : "CHAMAR MOTOTAXI"}
-            </Text>
+            <Text style={styles.textoBotaoMapa}>CHAMAR MOTOTAXI</Text>
           </TouchableOpacity>
+        )}
+
+        {!motoristaAceitou && buscando && (
+          <>
+            <TouchableOpacity
+              style={styles.botaoBuscandoMapa}
+              disabled
+            >
+              <Text style={styles.textoBotaoMapa}>BUSCANDO...</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.botaoCancelarPedidoMapa}
+              onPress={cancelarPedidoPendente}
+              disabled={cancelandoPedido || !chamadaAtual?.idChamada}
+            >
+              <Text style={styles.textoBotaoCancelarMapa}>
+                {cancelandoPedido ? "CANCELANDO..." : "CANCELAR PEDIDO"}
+              </Text>
+            </TouchableOpacity>
+          </>
         )}
 
         {motoristaAceitou && (
@@ -1020,6 +1141,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: "center",
     marginTop: 5,
+  },
+  botaoCancelarPedidoMapa: {
+    backgroundColor: "#dc2626",
+    paddingVertical: 16,
+    borderRadius: 18,
+    marginTop: 12,
+    opacity: 0.96,
   },
   botaoCancelarMapa: {
     backgroundColor: "#dc2626",
