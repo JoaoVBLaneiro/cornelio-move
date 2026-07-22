@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cornelio Move Motorista",
     "slug": "motorista-app",
-    "version": "1.0.109",
+    "version": "1.0.110",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
@@ -10,7 +10,7 @@
     ],
     "android": {
       "package": "com.corneliomove.motorista",
-      "versionCode": 109,
+      "versionCode": 110,
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_FINE_LOCATION",
@@ -24,7 +24,10 @@
         "USE_FULL_SCREEN_INTENT",
         "WAKE_LOCK",
         "VIBRATE",
-        "DISABLE_KEYGUARD"
+        "DISABLE_KEYGUARD",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ],
       "googleServicesFile": "./google-services.json"
     },
@@ -35,6 +38,13 @@
           "android": {
             "usesCleartextTraffic": true
           }
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       "expo-notifications",

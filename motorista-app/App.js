@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Linking,
@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import * as Location from "expo-location";
+import * as TaskManager from "expo-task-manager";
 import * as SecureStore from "expo-secure-store";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
@@ -24,6 +25,97 @@ const CATEGORIA_CORRIDA = "corrida";
 const CANAL_CORRIDAS = "corridas";
 const CANAL_CORRIDAS_URGENTES = "corridas-urgentes";
 const STORAGE_MOTORISTA = "cornelio_move_motorista_sessao_v1";
+
+const TASK_LOCALIZACAO_BACKGROUND = "cornelio_move_motorista_background_location";
+
+function configuracaoLocalizacaoPorModo(modo = "economico") {
+  return modo === "alta_precisao"
+    ? {
+        accuracy: Location.Accuracy.High,
+        timeInterval: 2500,
+        distanceInterval: 5,
+      }
+    : {
+        accuracy: Location.Accuracy.High,
+        timeInterval: 8000,
+        distanceInterval: 20,
+      };
+}
+
+async function enviarLocalizacaoMotoristaPorHttp(coords = {}, origem = "background") {
+  try {
+    if (!BACKEND_URL) {
+      return;
+    }
+
+    const latitude = Number(coords.latitude);
+    const longitude = Number(coords.longitude);
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return;
+    }
+
+    const bruto = await SecureStore.getItemAsync(STORAGE_MOTORISTA);
+
+    if (!bruto) {
+      return;
+    }
+
+    const sessao = JSON.parse(bruto);
+    const desejaOnline = Boolean(sessao?.desejaOnline);
+    const login = String(sessao?.login || sessao?.motorista?.login || "").trim();
+    const tokenSessao = String(sessao?.tokenSessao || "").trim();
+
+    if (!desejaOnline || !login || !tokenSessao) {
+      return;
+    }
+
+    await fetch(`${BACKEND_URL}/motorista/nativo/localizacao`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        login,
+        idMotorista: login,
+        tokenSessao,
+        latitude,
+        longitude,
+        accuracy: coords.accuracy || "",
+        modoLocalizacao: origem,
+        expoPushToken: sessao?.expoPushToken || "",
+        fcmToken: sessao?.fcmToken || "",
+      }),
+    }).catch((error) => {
+      console.log("Falha HTTP ao enviar localizacao do motorista:", error.message);
+    });
+  } catch (error) {
+    console.log("Erro ao enviar localizacao background:", error.message);
+  }
+}
+
+TaskManager.defineTask(TASK_LOCALIZACAO_BACKGROUND, async ({ data, error }) => {
+  if (error) {
+    console.log("Erro na tarefa de localizacao background:", error.message);
+    return;
+  }
+
+  const locations = data?.locations || [];
+  const ultima = locations[locations.length - 1];
+
+  if (!ultima?.coords) {
+    return;
+  }
+
+  await enviarLocalizacaoMotoristaPorHttp(
+    {
+      latitude: ultima.coords.latitude,
+      longitude: ultima.coords.longitude,
+      accuracy: ultima.coords.accuracy,
+    },
+    "background"
+  );
+});
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -403,6 +495,12 @@ export default function App() {
       const senhaAtual = String(
         Object.prototype.hasOwnProperty.call(opcoes, "senha") ? opcoes.senha : senha
       );
+      const expoPushTokenAtual = Object.prototype.hasOwnProperty.call(opcoes, "expoPushToken")
+        ? opcoes.expoPushToken
+        : expoPushTokenRef.current;
+      const fcmTokenAtual = Object.prototype.hasOwnProperty.call(opcoes, "fcmToken")
+        ? opcoes.fcmToken
+        : fcmTokenRef.current;
 
       if (!loginAtual || !senhaAtual) {
         return;
@@ -413,6 +511,8 @@ export default function App() {
         senha: senhaAtual,
         motorista: motoristaAtual || null,
         tokenSessao: tokenAtual || null,
+        expoPushToken: expoPushTokenAtual || null,
+        fcmToken: fcmTokenAtual || null,
         desejaOnline: Boolean(
           Object.prototype.hasOwnProperty.call(opcoes, "desejaOnline")
             ? opcoes.desejaOnline
@@ -583,6 +683,10 @@ export default function App() {
     const unsubscribeToken = messaging().onTokenRefresh((novoToken) => {
       fcmTokenRef.current = novoToken;
       setStatusFcm("Tela cheia preparada");
+
+      salvarSessaoMotorista({ fcmToken: novoToken }).catch((error) => {
+        console.log("Nao foi possivel salvar FCM atualizado:", error.message);
+      });
 
       if (socketRef.current && socketRef.current.connected) {
         socketRef.current.emit("atualizar_fcm_token", {
@@ -893,11 +997,107 @@ export default function App() {
     }
   }
 
+  async function pararLocalizacaoBackground() {
+    try {
+      const ativa = await Location.hasStartedLocationUpdatesAsync(TASK_LOCALIZACAO_BACKGROUND);
+
+      if (ativa) {
+        await Location.stopLocationUpdatesAsync(TASK_LOCALIZACAO_BACKGROUND);
+      }
+    } catch (error) {
+      console.log("Nao foi possivel parar localizacao background:", error.message);
+    }
+  }
+
+  async function garantirPermissaoLocalizacaoBackground() {
+    try {
+      const permissaoForegroundAtual = await Location.getForegroundPermissionsAsync();
+      let statusForeground = permissaoForegroundAtual.status;
+
+      if (statusForeground !== "granted") {
+        const novaPermissaoForeground = await Location.requestForegroundPermissionsAsync();
+        statusForeground = novaPermissaoForeground.status;
+      }
+
+      if (statusForeground !== "granted") {
+        Alert.alert("Permissao negada", "Nao foi possivel acessar a localizacao.");
+        return false;
+      }
+
+      if (Platform.OS !== "android") {
+        return true;
+      }
+
+      const permissaoBackgroundAtual = await Location.getBackgroundPermissionsAsync();
+
+      if (permissaoBackgroundAtual.status === "granted") {
+        return true;
+      }
+
+      Alert.alert(
+        "Localizacao em segundo plano",
+        "Para o cliente acompanhar o mototaxista com a tela bloqueada, permita a localizacao o tempo todo nas proximas telas."
+      );
+
+      const novaPermissaoBackground = await Location.requestBackgroundPermissionsAsync();
+
+      if (novaPermissaoBackground.status !== "granted") {
+        Alert.alert(
+          "Localizacao limitada",
+          "Sem a permissao 'Permitir o tempo todo', a localizacao pode parar quando o app ficar em segundo plano."
+        );
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.log("Erro ao pedir permissao background:", error.message);
+      return false;
+    }
+  }
+
+  async function iniciarLocalizacaoBackground(modo = "economico") {
+    try {
+      const permitido = await garantirPermissaoLocalizacaoBackground();
+
+      if (!permitido) {
+        return;
+      }
+
+      const jaAtiva = await Location.hasStartedLocationUpdatesAsync(TASK_LOCALIZACAO_BACKGROUND);
+
+      if (jaAtiva) {
+        await Location.stopLocationUpdatesAsync(TASK_LOCALIZACAO_BACKGROUND);
+      }
+
+      await Location.startLocationUpdatesAsync(TASK_LOCALIZACAO_BACKGROUND, {
+        ...configuracaoLocalizacaoPorModo(modo),
+        foregroundService: {
+          notificationTitle: "Cornelio Move Motorista",
+          notificationBody:
+            modo === "alta_precisao"
+              ? "Corrida em andamento: enviando localizacao em tempo real."
+              : "Voce esta online: enviando localizacao quando possivel.",
+          notificationColor: "#2563eb",
+          killServiceOnDestroy: false,
+        },
+      });
+    } catch (error) {
+      console.log("Nao foi possivel iniciar localizacao background:", error.message);
+      Alert.alert(
+        "Localizacao em segundo plano",
+        "Nao foi possivel ativar a localizacao com tela bloqueada: " + error.message
+      );
+    }
+  }
+
   async function pararMonitoramentoLocalizacao() {
     if (locationWatcherRef.current) {
       locationWatcherRef.current.remove();
       locationWatcherRef.current = null;
     }
+
+    await pararLocalizacaoBackground();
   }
 
   async function iniciarMonitoramentoLocalizacao(modo = "economico") {
@@ -905,20 +1105,9 @@ export default function App() {
 
     setModoLocalizacao(modo);
 
-    const configuracao =
-      modo === "alta_precisao"
-        ? {
-            accuracy: Location.Accuracy.High,
-            timeInterval: 2500,
-            distanceInterval: 5,
-          }
-        : {
-            accuracy: Location.Accuracy.High,
-            timeInterval: 8000,
-            distanceInterval: 20,
-          };
+    const configuracao = configuracaoLocalizacaoPorModo(modo);
 
-    const watcher = await Location.watchPositionAsync(configuracao, (posicao) => {
+    const watcher = await Location.watchPositionAsync(configuracao, async (posicao) => {
       const coords = {
         latitude: posicao.coords.latitude,
         longitude: posicao.coords.longitude,
@@ -930,10 +1119,14 @@ export default function App() {
 
       if (socketRef.current && socketRef.current.connected) {
         socketRef.current.emit("atualizar_localizacao", coords);
+      } else {
+        await enviarLocalizacaoMotoristaPorHttp(coords, "foreground_sem_socket");
       }
     });
 
     locationWatcherRef.current = watcher;
+
+    await iniciarLocalizacaoBackground(modo);
   }
 
   async function restaurarOnlineAutomaticamente() {
