@@ -52,6 +52,7 @@ function gerarMapaHtmlPassageiro(localizacao, motoristaMapa, nomeMotorista) {
     motorista,
     nomeMotorista: nomeMotorista || motoristaMapa?.nomeMotorista || "Mototaxista",
     tipoMotorista: motoristaMapa?.tipo || "",
+    centralizar: true,
   });
 
   return `<!DOCTYPE html>
@@ -87,62 +88,118 @@ function gerarMapaHtmlPassageiro(localizacao, motoristaMapa, nomeMotorista) {
   <div id="map"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    const dados = ${dados};
+    const dadosIniciais = ${dados};
+    const centroInicial = dadosIniciais.centro || { latitude: -23.1813, longitude: -50.6460 };
+
     const map = L.map('map', {
       zoomControl: false,
       attributionControl: false,
       dragging: true,
       tap: true
-    }).setView([dados.centro.latitude, dados.centro.longitude], dados.passageiro ? 16 : 14);
+    }).setView([centroInicial.latitude, centroInicial.longitude], dadosIniciais.passageiro ? 16 : 14);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19
     }).addTo(map);
 
-    const pontos = [];
+    let marcadorPassageiro = null;
+    let circuloPrecisaoPassageiro = null;
+    let marcadorMotorista = null;
+    let usuarioMexeuMapa = false;
 
-    if (dados.passageiro) {
-      const p = [dados.passageiro.latitude, dados.passageiro.longitude];
-      pontos.push(p);
-      L.circleMarker(p, {
-        radius: 9,
-        color: '#0f172a',
-        weight: 3,
-        fillColor: '#22c55e',
-        fillOpacity: 1
-      }).addTo(map).bindTooltip('Voce', { permanent: true, direction: 'top', className: 'rotulo' });
+    map.on('dragstart zoomstart', function() {
+      usuarioMexeuMapa = true;
+    });
 
-      if (dados.passageiro.accuracy) {
-        L.circle(p, {
-          radius: Math.max(10, Math.min(Number(dados.passageiro.accuracy), 120)),
-          color: '#22c55e',
-          weight: 1,
-          fillColor: '#22c55e',
-          fillOpacity: 0.08
-        }).addTo(map);
+    const iconeMoto = L.divIcon({
+      className: '',
+      html: '<div style="width:38px;height:38px;border-radius:999px;background:#facc15;border:3px solid #0f172a;display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 8px 18px rgba(0,0,0,0.28);">🏍️</div>',
+      iconSize: [38, 38],
+      iconAnchor: [19, 19]
+    });
+
+    function pontoValido(ponto) {
+      return ponto &&
+        Number.isFinite(Number(ponto.latitude)) &&
+        Number.isFinite(Number(ponto.longitude)) &&
+        Math.abs(Number(ponto.latitude)) > 0.000001 &&
+        Math.abs(Number(ponto.longitude)) > 0.000001;
+    }
+
+    function atualizarMapaCornelio(novosDados) {
+      const dados = novosDados || {};
+      const pontos = [];
+
+      if (pontoValido(dados.passageiro)) {
+        const p = [Number(dados.passageiro.latitude), Number(dados.passageiro.longitude)];
+        pontos.push(p);
+
+        if (!marcadorPassageiro) {
+          marcadorPassageiro = L.circleMarker(p, {
+            radius: 9,
+            color: '#0f172a',
+            weight: 3,
+            fillColor: '#22c55e',
+            fillOpacity: 1
+          }).addTo(map).bindTooltip('Voce', { permanent: true, direction: 'top', className: 'rotulo' });
+        } else {
+          marcadorPassageiro.setLatLng(p);
+        }
+
+        if (circuloPrecisaoPassageiro) {
+          map.removeLayer(circuloPrecisaoPassageiro);
+          circuloPrecisaoPassageiro = null;
+        }
+
+        if (dados.passageiro.accuracy) {
+          circuloPrecisaoPassageiro = L.circle(p, {
+            radius: Math.max(10, Math.min(Number(dados.passageiro.accuracy), 120)),
+            color: '#22c55e',
+            weight: 1,
+            fillColor: '#22c55e',
+            fillOpacity: 0.08
+          }).addTo(map);
+        }
+      }
+
+      if (pontoValido(dados.motorista)) {
+        const m = [Number(dados.motorista.latitude), Number(dados.motorista.longitude)];
+        pontos.push(m);
+
+        if (!marcadorMotorista) {
+          marcadorMotorista = L.marker(m, { icon: iconeMoto })
+            .addTo(map)
+            .bindTooltip(dados.nomeMotorista || 'Mototaxista', {
+              permanent: true,
+              direction: 'top',
+              className: 'rotulo'
+            });
+        } else {
+          marcadorMotorista.setLatLng(m);
+          if (dados.nomeMotorista) {
+            marcadorMotorista.setTooltipContent(dados.nomeMotorista);
+          }
+        }
+      } else if (marcadorMotorista) {
+        map.removeLayer(marcadorMotorista);
+        marcadorMotorista = null;
+      }
+
+      if (dados.centralizar && !usuarioMexeuMapa && pontos.length > 0) {
+        if (pontos.length >= 2) {
+          map.fitBounds(pontos, {
+            paddingTopLeft: [70, 70],
+            paddingBottomRight: [70, 230],
+            maxZoom: 17
+          });
+        } else {
+          map.setView(pontos[0], 16, { animate: true });
+        }
       }
     }
 
-    if (dados.motorista) {
-      const m = [dados.motorista.latitude, dados.motorista.longitude];
-      pontos.push(m);
-
-      const iconeMoto = L.divIcon({
-        className: '',
-        html: '<div style="width:38px;height:38px;border-radius:999px;background:#facc15;border:3px solid #0f172a;display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 8px 18px rgba(0,0,0,0.28);">🏍️</div>',
-        iconSize: [38, 38],
-        iconAnchor: [19, 19]
-      });
-
-      L.marker(m, { icon: iconeMoto })
-        .addTo(map)
-        .bindTooltip(dados.nomeMotorista || 'Mototaxista', { permanent: true, direction: 'top', className: 'rotulo' });
-    }
-
-    if (pontos.length >= 2) {
-      L.polyline(pontos, { color: '#111827', weight: 4, opacity: 0.65, dashArray: '8, 8' }).addTo(map);
-      map.fitBounds(pontos, { padding: [70, 70], maxZoom: 17 });
-    }
+    window.atualizarMapaCornelio = atualizarMapaCornelio;
+    atualizarMapaCornelio(dadosIniciais);
   </script>
 </body>
 </html>`;
@@ -157,6 +214,9 @@ export default function App() {
   const passageiroRef = useRef(null);
   const tokenSessaoRef = useRef(null);
   const restaurandoAuthRef = useRef(false);
+  const mapaWebViewRef = useRef(null);
+  const mapaHtmlInicialRef = useRef(null);
+  const ultimaCentralizacaoMapaRef = useRef("");
 
   const [conectado, setConectado] = useState(false);
   const [buscando, setBuscando] = useState(false);
@@ -177,6 +237,10 @@ export default function App() {
   const [menuAberto, setMenuAberto] = useState(false);
   const [motoristaMapa, setMotoristaMapa] = useState(null);
   const [cancelandoPedido, setCancelandoPedido] = useState(false);
+
+  if (!mapaHtmlInicialRef.current) {
+    mapaHtmlInicialRef.current = gerarMapaHtmlPassageiro(null, null, "");
+  }
 
 
   async function salvarSessaoPassageiro(opcoes = {}) {
@@ -555,6 +619,66 @@ export default function App() {
     };
   }, [chamadaAtual?.idChamada, motoristaAceitou]);
 
+  function montarPayloadAtualizacaoMapa(centralizarManual = false) {
+    const passageiroMapa = montarPontoMapa(localizacao);
+    const motorista = montarPontoMapa(motoristaMapa);
+    const idCentralizacao = chamadaAtual?.idChamada || (passageiroMapa ? "localizacao-passageiro" : "inicio");
+    const deveCentralizarAutomaticamente =
+      Boolean(passageiroMapa || motorista) &&
+      ultimaCentralizacaoMapaRef.current !== idCentralizacao;
+
+    if (deveCentralizarAutomaticamente) {
+      ultimaCentralizacaoMapaRef.current = idCentralizacao;
+    }
+
+    return {
+      centro: passageiroMapa || motorista || { latitude: -23.1813, longitude: -50.6460 },
+      passageiro: passageiroMapa,
+      motorista,
+      nomeMotorista: motoristaAceitou || motoristaMapa?.nomeMotorista || chamadaAtual?.nomeMotorista || "Mototaxista",
+      tipoMotorista: motoristaMapa?.tipo || "",
+      centralizar: Boolean(centralizarManual || deveCentralizarAutomaticamente),
+    };
+  }
+
+  function injetarAtualizacaoMapa(centralizarManual = false) {
+    if (!mapaWebViewRef.current) {
+      return;
+    }
+
+    const payload = montarPayloadAtualizacaoMapa(centralizarManual);
+    const script = `
+      if (window.atualizarMapaCornelio) {
+        window.atualizarMapaCornelio(${JSON.stringify(payload)});
+      }
+      true;
+    `;
+
+    mapaWebViewRef.current.injectJavaScript(script);
+  }
+
+  useEffect(() => {
+    if (!passageiro) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      injetarAtualizacaoMapa(false);
+    }, 80);
+
+    return () => clearTimeout(timeout);
+  }, [
+    passageiro,
+    localizacao,
+    motoristaMapa,
+    motoristaAceitou,
+    chamadaAtual?.idChamada,
+    chamadaAtual?.nomeMotorista,
+    chamadaAtual?.distancia,
+    chamadaAtual?.tempo,
+  ]);
+
+
   async function enviarAuth(tipo) {
     const celularLimpo = normalizarCelular(celular);
     const nomeLimpo = nome.trim();
@@ -640,6 +764,7 @@ export default function App() {
     setLocalizacao(null);
     setMotoristaAceitou(null);
     setChamadaAtual(null);
+    setMotoristaMapa(null);
     passageiroRef.current = null;
     tokenSessaoRef.current = null;
     setPassageiro(null);
@@ -932,23 +1057,15 @@ export default function App() {
     detalheMotoristaPainel ||
     (motoristaMapa ? "Localizacao do mototaxista no mapa" : "Aguardando localizacao do mototaxista...");
 
-  const mapaHtml = gerarMapaHtmlPassageiro(localizacao, motoristaMapa, nomeMotoristaPainel || motoristaAceitou);
-  const chaveMapa = [
-    localizacao?.latitude,
-    localizacao?.longitude,
-    motoristaMapa?.latitude,
-    motoristaMapa?.longitude,
-    motoristaMapa?.distancia,
-    motoristaMapa?.tempo,
-    motoristaMapa?.tipo,
-    chamadaAtual?.idChamada || "sem-corrida",
-  ].join("-");
+  const mapaHtml = mapaHtmlInicialRef.current;
+  const chaveMapa = String(passageiro?.idPassageiro || passageiro?.celular || "passageiro-logado");
 
   return (
     <View style={styles.telaMapa}>
       <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
 
       <WebView
+        ref={mapaWebViewRef}
         key={chaveMapa}
         originWhitelist={["*"]}
         source={{ html: mapaHtml }}
@@ -958,6 +1075,9 @@ export default function App() {
         mixedContentMode="always"
         showsHorizontalScrollIndicator={false}
         showsVerticalScrollIndicator={false}
+        onLoadEnd={() => {
+          setTimeout(() => injetarAtualizacaoMapa(true), 150);
+        }}
       />
 
       <TouchableOpacity style={styles.botaoMenuMapa} onPress={() => setMenuAberto((valor) => !valor)}>
