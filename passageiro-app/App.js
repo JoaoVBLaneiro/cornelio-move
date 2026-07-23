@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
+  Image,
+  Linking,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -237,11 +239,66 @@ export default function App() {
   const [menuAberto, setMenuAberto] = useState(false);
   const [motoristaMapa, setMotoristaMapa] = useState(null);
   const [cancelandoPedido, setCancelandoPedido] = useState(false);
+  const [precoCorridaFormatado, setPrecoCorridaFormatado] = useState("Carregando preço...");
+  const [resumoMotoristas, setResumoMotoristas] = useState(null);
 
   if (!mapaHtmlInicialRef.current) {
     mapaHtmlInicialRef.current = gerarMapaHtmlPassageiro(null, null, "");
   }
 
+
+  async function carregarPrecoCorrida() {
+    try {
+      const resposta = await fetch(`${BACKEND_URL}/configuracoes-publicas?t=${Date.now()}`);
+      const dados = await resposta.json().catch(() => null);
+
+      if (resposta.ok && dados?.ok) {
+        setPrecoCorridaFormatado(dados.precoCorridaFormatado || "R$ 0,00");
+      }
+    } catch (error) {
+      console.log("Nao foi possivel carregar o preco da corrida:", error.message);
+    }
+  }
+
+  async function carregarResumoMotoristas() {
+    try {
+      const resposta = await fetch(`${BACKEND_URL}/resumo-motoristas-publico?t=${Date.now()}`);
+      const dados = await resposta.json().catch(() => null);
+
+      if (resposta.ok && dados?.ok) {
+        setResumoMotoristas({
+          disponiveis: Number(dados.disponiveis || 0),
+          emCorrida: Number(dados.emCorrida || 0),
+          foraServico: Number(dados.foraServico || 0),
+          totalCadastrados: Number(dados.totalCadastrados || 0),
+        });
+      }
+    } catch (error) {
+      console.log("Nao foi possivel carregar o resumo dos motoristas:", error.message);
+    }
+  }
+
+  async function atualizarInformacoesPublicas() {
+    await Promise.allSettled([
+      carregarPrecoCorrida(),
+      carregarResumoMotoristas(),
+    ]);
+  }
+
+  async function abrirAjudaWhatsApp() {
+    const telefone = "5543999882100";
+    const mensagem = encodeURIComponent("Olá! Preciso de ajuda com o Cornélio Move.");
+    const url = `https://wa.me/${telefone}?text=${mensagem}`;
+
+    try {
+      await Linking.openURL(url);
+    } catch (error) {
+      Alert.alert(
+        "Nao foi possivel abrir o WhatsApp",
+        "Entre em contato pelo numero (43) 99988-2100."
+      );
+    }
+  }
 
   async function salvarSessaoPassageiro(opcoes = {}) {
     try {
@@ -372,6 +429,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    atualizarInformacoesPublicas();
+
+    const intervalo = setInterval(atualizarInformacoesPublicas, 10000);
+
+    return () => clearInterval(intervalo);
+  }, []);
+
+  useEffect(() => {
     if (!passageiro || !tokenSessao) {
       return;
     }
@@ -389,6 +454,18 @@ export default function App() {
     socketRef.current.on("disconnect", () => {
       setConectado(false);
       console.log("Passageiro desconectado");
+    });
+
+    socketRef.current.on("lista_motoristas", () => {
+      carregarResumoMotoristas();
+    });
+
+    socketRef.current.on("configuracoes_sistema_atualizadas", (dados) => {
+      if (dados?.precoCorridaFormatado) {
+        setPrecoCorridaFormatado(dados.precoCorridaFormatado);
+      } else {
+        carregarPrecoCorrida();
+      }
     });
 
     socketRef.current.on("status_chamada", async (dados) => {
@@ -1080,8 +1157,41 @@ export default function App() {
         }}
       />
 
+      <View style={styles.resumoMotoristasMapa}>
+        <Text style={styles.resumoMotoristasTitulo}>Motoristas:</Text>
+
+        <View style={styles.resumoMotoristasLinha}>
+          <View style={[styles.bolinhaMotorista, styles.bolinhaDisponivel]} />
+          <Text style={styles.resumoMotoristasTexto}>
+            {resumoMotoristas?.disponiveis ?? "–"} disponíveis
+          </Text>
+        </View>
+
+        <View style={styles.resumoMotoristasLinha}>
+          <View style={[styles.bolinhaMotorista, styles.bolinhaCorrida]} />
+          <Text style={styles.resumoMotoristasTexto}>
+            {resumoMotoristas?.emCorrida ?? "–"} com passageiro
+          </Text>
+        </View>
+
+        <View style={styles.resumoMotoristasLinha}>
+          <View style={[styles.bolinhaMotorista, styles.bolinhaForaServico]} />
+          <Text style={styles.resumoMotoristasTexto}>
+            {resumoMotoristas?.foraServico ?? "–"} fora de serviço
+          </Text>
+        </View>
+      </View>
+
       <TouchableOpacity style={styles.botaoMenuMapa} onPress={() => setMenuAberto((valor) => !valor)}>
         <Text style={styles.textoMenuMapa}>☰</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.botaoAjudaMapa} onPress={abrirAjudaWhatsApp}>
+        <Image
+          source={require("./assets/whatsapp-help.png")}
+          style={styles.iconeAjudaMapa}
+        />
+        <Text style={styles.textoAjudaMapa}>AJUDA</Text>
       </TouchableOpacity>
 
       {menuAberto && (
@@ -1118,6 +1228,7 @@ export default function App() {
             onPress={chamarMototaxi}
           >
             <Text style={styles.textoBotaoMapa}>CHAMAR MOTOTAXI</Text>
+            <Text style={styles.textoPrecoBotaoMapa}>{precoCorridaFormatado}</Text>
           </TouchableOpacity>
         )}
 
@@ -1223,6 +1334,52 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#dbe4e8",
   },
+  resumoMotoristasMapa: {
+    position: "absolute",
+    top: 44,
+    left: 16,
+    width: 178,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  resumoMotoristasTitulo: {
+    color: "#111827",
+    fontSize: 12,
+    fontWeight: "bold",
+    marginBottom: 4,
+  },
+  resumoMotoristasLinha: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 18,
+  },
+  bolinhaMotorista: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    marginRight: 7,
+  },
+  bolinhaDisponivel: {
+    backgroundColor: "#22c55e",
+  },
+  bolinhaCorrida: {
+    backgroundColor: "#facc15",
+  },
+  bolinhaForaServico: {
+    backgroundColor: "#ef4444",
+  },
+  resumoMotoristasTexto: {
+    color: "#334155",
+    fontSize: 11,
+    fontWeight: "600",
+  },
   botaoMenuMapa: {
     position: "absolute",
     top: 44,
@@ -1245,9 +1402,35 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     marginTop: -4,
   },
-  menuFlutuante: {
+  botaoAjudaMapa: {
     position: "absolute",
     top: 102,
+    right: 20,
+    width: 58,
+    height: 50,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  iconeAjudaMapa: {
+    width: 22,
+    height: 22,
+  },
+  textoAjudaMapa: {
+    color: "#166534",
+    fontSize: 9,
+    fontWeight: "bold",
+    marginTop: 1,
+  },
+  menuFlutuante: {
+    position: "absolute",
+    top: 162,
     right: 20,
     width: 230,
     backgroundColor: "rgba(17,24,39,0.96)",
@@ -1285,7 +1468,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 18,
     right: 18,
-    bottom: 22,
+    bottom: 70,
     backgroundColor: "rgba(255,255,255,0.96)",
     borderRadius: 28,
     padding: 18,
@@ -1325,6 +1508,13 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "bold",
     textAlign: "center",
+  },
+  textoPrecoBotaoMapa: {
+    color: "#14532d",
+    fontSize: 13,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginTop: 3,
   },
   caixaMotoristaMapa: {
     backgroundColor: "#f1f5f9",
