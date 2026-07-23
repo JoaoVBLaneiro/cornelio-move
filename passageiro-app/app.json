@@ -1,44 +1,45 @@
 {
-  "expo": {
-    "name": "Cornelio Move Passageiro",
-    "slug": "cornelio-move-passageiro",
-    "version": "1.0.4",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
-    "ios": {
-      "supportsTablet": true
-    },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      },
-      "edgeToEdgeEnabled": true,
-      "versionCode": 9,
-      "package": "com.corneliomove.passageiro",
-      "usesCleartextTraffic": true
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    },
-    "scheme": "corneliomovepassageiro",
-    "plugins": [
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "usesCleartextTraffic": true
-          }
-        }
-      ],
-      "expo-secure-store"
-    ]
-  }
+    "expo":  {
+                 "name":  "Cornelio Move Passageiro",
+                 "slug":  "cornelio-move-passageiro",
+                 "orientation":  "portrait",
+                 "userInterfaceStyle":  "light",
+                 "newArchEnabled":  true,
+                 "splash":  {
+                                "image":  "./assets/splash-icon.png",
+                                "resizeMode":  "contain",
+                                "backgroundColor":  "#ffffff"
+                            },
+                 "ios":  {
+                             "supportsTablet":  true
+                         },
+                 "android":  {
+                                 "adaptiveIcon":  {
+                                                      "foregroundImage":  "./assets/adaptive-icon.png",
+                                                      "backgroundColor":  "#000000"
+                                                  },
+                                 "edgeToEdgeEnabled":  true,
+                                 "package":  "com.corneliomove.passageiro",
+                                 "usesCleartextTraffic":  true,
+                                 "icon":  "./assets/icon.png",
+                                 "versionCode":  10
+                             },
+                 "web":  {
+                             "favicon":  "./assets/favicon.png"
+                         },
+                 "scheme":  "corneliomovepassageiro",
+                 "plugins":  [
+                                 [
+                                     "expo-build-properties",
+                                     {
+                                         "android":  {
+                                                         "usesCleartextTraffic":  true
+                                                     }
+                                     }
+                                 ],
+                                 "expo-secure-store"
+                             ],
+                 "icon":  "./assets/icon.png",
+                 "version":  "1.0.5"
+             }
 }
