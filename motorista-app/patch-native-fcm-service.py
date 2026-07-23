@@ -160,6 +160,9 @@ object CornelioCorridaNativaStore {{
 class CornelioIncomingCallActivity : Activity() {{
 
   private val backendUrl = "http://207.180.245.177:3001"
+
+  private fun dp(valor: Int): Int =
+    (valor * resources.displayMetrics.density).toInt()
   private val monitorHandler = Handler(Looper.getMainLooper())
 
   @Volatile
@@ -361,7 +364,7 @@ class CornelioIncomingCallActivity : Activity() {{
     val root = LinearLayout(this)
     root.orientation = LinearLayout.VERTICAL
     root.gravity = Gravity.CENTER
-    root.setPadding(42, 56, 42, 42)
+    root.setPadding(dp(16), dp(24), dp(16), dp(24))
     root.setBackgroundColor(Color.rgb(11, 18, 32))
 
     val titulo = TextView(this)
@@ -398,7 +401,7 @@ class CornelioIncomingCallActivity : Activity() {{
     val scroll = ScrollView(this)
     val root = LinearLayout(this)
     root.orientation = LinearLayout.VERTICAL
-    root.setPadding(42, 56, 42, 42)
+    root.setPadding(dp(16), dp(24), dp(16), dp(24))
     root.setBackgroundColor(Color.rgb(11, 18, 32))
     scroll.addView(root)
 
@@ -412,14 +415,14 @@ class CornelioIncomingCallActivity : Activity() {{
 
     val card = LinearLayout(this)
     card.orientation = LinearLayout.VERTICAL
-    card.setPadding(34, 34, 34, 34)
+    card.setPadding(dp(18), dp(18), dp(18), dp(18))
     card.setBackgroundColor(Color.rgb(255, 204, 20))
 
     val cardParams = LinearLayout.LayoutParams(
       LinearLayout.LayoutParams.MATCH_PARENT,
       LinearLayout.LayoutParams.WRAP_CONTENT
     )
-    cardParams.setMargins(0, 36, 0, 36)
+    cardParams.setMargins(0, dp(18), 0, dp(18))
     root.addView(card, cardParams)
 
     fun textoCard(valor: String, tamanho: Float, negrito: Boolean = false): TextView {{
@@ -459,11 +462,18 @@ class CornelioIncomingCallActivity : Activity() {{
     aceitar.setTextColor(Color.WHITE)
     aceitar.setBackgroundColor(Color.rgb(22, 163, 74))
 
-    val p1 = LinearLayout.LayoutParams(0, 120, 1f)
-    p1.setMargins(0, 24, 16, 0)
+    recusar.gravity = Gravity.CENTER
+    aceitar.gravity = Gravity.CENTER
+    recusar.minimumHeight = dp(64)
+    aceitar.minimumHeight = dp(64)
+    recusar.setPadding(dp(10), 0, dp(10), 0)
+    aceitar.setPadding(dp(10), 0, dp(10), 0)
 
-    val p2 = LinearLayout.LayoutParams(0, 120, 1f)
-    p2.setMargins(16, 24, 0, 0)
+    val p1 = LinearLayout.LayoutParams(0, dp(64), 1f)
+    p1.setMargins(0, dp(12), dp(6), 0)
+
+    val p2 = LinearLayout.LayoutParams(0, dp(64), 1f)
+    p2.setMargins(dp(6), dp(12), 0, 0)
 
     botoes.addView(recusar, p1)
     botoes.addView(aceitar, p2)
@@ -497,7 +507,7 @@ class CornelioIncomingCallActivity : Activity() {{
     val scroll = ScrollView(this)
     val root = LinearLayout(this)
     root.orientation = LinearLayout.VERTICAL
-    root.setPadding(42, 56, 42, 42)
+    root.setPadding(dp(16), dp(24), dp(16), dp(24))
     root.setBackgroundColor(Color.rgb(11, 18, 32))
     scroll.addView(root)
 
@@ -517,14 +527,14 @@ class CornelioIncomingCallActivity : Activity() {{
 
     val card = LinearLayout(this)
     card.orientation = LinearLayout.VERTICAL
-    card.setPadding(34, 34, 34, 34)
+    card.setPadding(dp(18), dp(18), dp(18), dp(18))
     card.setBackgroundColor(Color.rgb(31, 41, 55))
 
     val cardParams = LinearLayout.LayoutParams(
       LinearLayout.LayoutParams.MATCH_PARENT,
       LinearLayout.LayoutParams.WRAP_CONTENT
     )
-    cardParams.setMargins(0, 36, 0, 36)
+    cardParams.setMargins(0, dp(18), 0, dp(18))
     root.addView(card, cardParams)
 
     card.addView(texto("Cliente: " + cliente, 20f, Color.WHITE, true))
@@ -542,9 +552,12 @@ class CornelioIncomingCallActivity : Activity() {{
     fun botao(rotulo: String, cor: Int): Button {{
       val b = Button(this)
       b.text = rotulo
-      b.textSize = 21f
+      b.textSize = 20f
       b.setTextColor(Color.WHITE)
       b.setBackgroundColor(cor)
+      b.gravity = Gravity.CENTER
+      b.minimumHeight = dp(64)
+      b.setPadding(dp(12), 0, dp(12), 0)
       return b
     }}
 
@@ -554,9 +567,9 @@ class CornelioIncomingCallActivity : Activity() {{
 
     val params = LinearLayout.LayoutParams(
       LinearLayout.LayoutParams.MATCH_PARENT,
-      120
+      dp(64)
     )
-    params.setMargins(0, 22, 0, 0)
+    params.setMargins(0, dp(12), 0, 0)
 
     card.addView(navegar, params)
     card.addView(cancelar, params)
