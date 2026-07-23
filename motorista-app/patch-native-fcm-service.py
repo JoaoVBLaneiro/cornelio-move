@@ -1,4 +1,5 @@
-﻿from pathlib import Path
+from pathlib import Path
+import re
 
 java_root = Path("android/app/src/main/java")
 main_files = list(java_root.rglob("MainActivity.kt"))
@@ -21,11 +22,11 @@ gradle_text = gradle_file.read_text(encoding="utf-8")
 if "com.google.firebase:firebase-messaging" not in gradle_text:
     gradle_text = gradle_text.replace(
         "dependencies {",
-        """dependencies {
+        '''dependencies {
     implementation platform("com.google.firebase:firebase-bom:34.15.0")
     implementation "com.google.firebase:firebase-messaging"
-""",
-        1
+''',
+        1,
     )
     gradle_file.write_text(gradle_text, encoding="utf-8")
 
@@ -36,13 +37,12 @@ activity_code = f'''package {package_name}
 import android.app.Activity
 import android.app.KeyguardManager
 import android.app.NotificationManager
-import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
@@ -58,25 +58,158 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
+object CornelioCorridaNativaStore {{
+  private const val PREFS = "cornelio_corrida_nativa_v2"
+  private const val ATIVA = "ativa"
+  private const val NOTIFICATION_ID = "notificationId"
+
+  private val campos = listOf(
+    "tipo",
+    "idMotorista",
+    "nomeMotorista",
+    "idChamada",
+    "tokenTentativa",
+    "cliente",
+    "endereco",
+    "observacao",
+    "latitudePassageiro",
+    "longitudePassageiro",
+    "distancia",
+    "tempo",
+    "origem",
+    "notificacaoId"
+  )
+
+  private fun prefs(context: Context) =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+  fun salvar(context: Context, dados: Map<String, String>, notificationId: Int) {{
+    val editor = prefs(context).edit().clear()
+    editor.putBoolean(ATIVA, true)
+    editor.putInt(NOTIFICATION_ID, notificationId)
+
+    for (campo in campos) {{
+      editor.putString(campo, dados[campo] ?: "")
+    }}
+
+    editor.apply()
+  }}
+
+  fun salvarIntent(context: Context, intent: Intent) {{
+    val editor = prefs(context).edit()
+    editor.putBoolean(ATIVA, true)
+
+    val notificationId = intent.getIntExtra(NOTIFICATION_ID, 0)
+    if (notificationId != 0) {{
+      editor.putInt(NOTIFICATION_ID, notificationId)
+    }}
+
+    for (campo in campos) {{
+      val valor = intent.getStringExtra(campo)
+      if (!valor.isNullOrBlank()) {{
+        editor.putString(campo, valor)
+      }}
+    }}
+
+    editor.apply()
+  }}
+
+  fun valor(context: Context, campo: String): String {{
+    return prefs(context).getString(campo, "") ?: ""
+  }}
+
+  fun notificationId(context: Context): Int {{
+    return prefs(context).getInt(NOTIFICATION_ID, 0)
+  }}
+
+  fun limpar(context: Context) {{
+    prefs(context).edit().clear().apply()
+  }}
+
+  fun criarIntent(context: Context): Intent? {{
+    val p = prefs(context)
+    if (!p.getBoolean(ATIVA, false)) {{
+      return null
+    }}
+
+    val idChamada = p.getString("idChamada", "") ?: ""
+    val tokenTentativa = p.getString("tokenTentativa", "") ?: ""
+    val idMotorista = p.getString("idMotorista", "") ?: ""
+
+    if (idChamada.isBlank() || tokenTentativa.isBlank() || idMotorista.isBlank()) {{
+      limpar(context)
+      return null
+    }}
+
+    val intent = Intent(context, CornelioIncomingCallActivity::class.java)
+    intent.addFlags(
+      Intent.FLAG_ACTIVITY_NEW_TASK or
+        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+        Intent.FLAG_ACTIVITY_SINGLE_TOP
+    )
+
+    for (campo in campos) {{
+      intent.putExtra(campo, p.getString(campo, "") ?: "")
+    }}
+
+    intent.putExtra(NOTIFICATION_ID, p.getInt(NOTIFICATION_ID, 0))
+    return intent
+  }}
+}}
+
 class CornelioIncomingCallActivity : Activity() {{
 
   private val backendUrl = "http://207.180.245.177:3001"
   private val monitorHandler = Handler(Looper.getMainLooper())
+
   @Volatile
   private var monitorandoTentativa = false
+
+  @Volatile
+  private var consultaEmAndamento = false
+
+  private var estadoTela = "carregando"
 
   override fun onCreate(savedInstanceState: Bundle?) {{
     super.onCreate(savedInstanceState)
 
     habilitarTelaBloqueada()
-    montarTela()
+    CornelioCorridaNativaStore.salvarIntent(this, intent)
+    montarTelaCarregando()
     iniciarMonitoramentoTentativa()
+  }}
 
+  override fun onNewIntent(novoIntent: Intent?) {{
+    super.onNewIntent(novoIntent)
+
+    if (novoIntent != null) {{
+      setIntent(novoIntent)
+      CornelioCorridaNativaStore.salvarIntent(this, novoIntent)
+      estadoTela = "carregando"
+      montarTelaCarregando()
+      iniciarMonitoramentoTentativa()
+    }}
+  }}
+
+  override fun onResume() {{
+    super.onResume()
+    habilitarTelaBloqueada()
+
+    if (!monitorandoTentativa) {{
+      iniciarMonitoramentoTentativa()
+    }} else {{
+      checarStatusTentativa()
+    }}
   }}
 
   override fun onDestroy() {{
     pararMonitoramentoTentativa()
     super.onDestroy()
+  }}
+
+  @Deprecated("Deprecated in Java")
+  override fun onBackPressed() {{
+    moveTaskToBack(true)
   }}
 
   private fun habilitarTelaBloqueada() {{
@@ -100,12 +233,22 @@ class CornelioIncomingCallActivity : Activity() {{
   }}
 
   private fun extra(nome: String): String {{
-    return intent.getStringExtra(nome) ?: ""
+    val direto = intent.getStringExtra(nome) ?: ""
+    if (direto.isNotBlank()) {{
+      return direto
+    }}
+
+    return CornelioCorridaNativaStore.valor(this, nome)
   }}
 
+  private fun notificationIdAtual(): Int {{
+    val direto = intent.getIntExtra("notificationId", 0)
+    return if (direto != 0) direto else CornelioCorridaNativaStore.notificationId(this)
+  }}
 
   private fun iniciarMonitoramentoTentativa() {{
     monitorandoTentativa = true
+    monitorHandler.removeCallbacksAndMessages(null)
     checarStatusTentativa()
   }}
 
@@ -114,18 +257,39 @@ class CornelioIncomingCallActivity : Activity() {{
     monitorHandler.removeCallbacksAndMessages(null)
   }}
 
+  private fun agendarNovaConsulta() {{
+    if (monitorandoTentativa && !isFinishing) {{
+      monitorHandler.postDelayed({{ checarStatusTentativa() }}, 1200)
+    }}
+  }}
+
   private fun checarStatusTentativa() {{
-    if (!monitorandoTentativa || isFinishing) {{
+    if (!monitorandoTentativa || isFinishing || consultaEmAndamento) {{
       return
     }}
 
+    val idChamada = extra("idChamada")
+    val tokenTentativa = extra("tokenTentativa")
+    val idMotorista = extra("idMotorista")
+
+    if (idChamada.isBlank() || tokenTentativa.isBlank() || idMotorista.isBlank()) {{
+      encerrarChamadaExpirada("Dados da corrida incompletos.")
+      return
+    }}
+
+    consultaEmAndamento = true
+
     Thread {{
+      var respostaValida = false
+      var ativa = true
+      var estado = ""
+
       try {{
         val urlTexto =
           backendUrl +
-            "/motorista/nativo/status?idChamada=" + URLEncoder.encode(extra("idChamada"), "UTF-8") +
-            "&tokenTentativa=" + URLEncoder.encode(extra("tokenTentativa"), "UTF-8") +
-            "&idMotorista=" + URLEncoder.encode(extra("idMotorista"), "UTF-8")
+            "/motorista/nativo/status?idChamada=" + URLEncoder.encode(idChamada, "UTF-8") +
+            "&tokenTentativa=" + URLEncoder.encode(tokenTentativa, "UTF-8") +
+            "&idMotorista=" + URLEncoder.encode(idMotorista, "UTF-8")
 
         val conn = URL(urlTexto).openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
@@ -142,44 +306,89 @@ class CornelioIncomingCallActivity : Activity() {{
           JSONObject()
         }}
 
-        val ok = json.optBoolean("ok", false)
-        val ativa = json.optBoolean("ativa", true)
-
-        if (ok && !ativa) {{
-          runOnUiThread {{
-            encerrarChamadaExpirada()
-          }}
-          return@Thread
-        }}
+        respostaValida = json.optBoolean("ok", false)
+        ativa = json.optBoolean("ativa", true)
+        estado = json.optString("estado", "")
       }} catch (_: Exception) {{
-        // Se a internet falhar por alguns segundos, nao fecha a chamada.
+        // Uma falha temporaria de rede nao encerra nem troca a tela da corrida.
       }}
 
       runOnUiThread {{
-        if (monitorandoTentativa && !isFinishing) {{
-          monitorHandler.postDelayed({{ checarStatusTentativa() }}, 1200)
+        consultaEmAndamento = false
+
+        if (!monitorandoTentativa || isFinishing) {{
+          return@runOnUiThread
         }}
+
+        if (respostaValida && !ativa) {{
+          val mensagem = if (estadoTela == "aceita") {{
+            "Corrida encerrada."
+          }} else {{
+            "Chamada expirada ou enviada para outro motorista."
+          }}
+          encerrarChamadaExpirada(mensagem)
+          return@runOnUiThread
+        }}
+
+        if (respostaValida && ativa) {{
+          when (estado) {{
+            "aceita" -> mostrarTelaCorridaAceitaSeNecessario()
+            "tentando_motorista" -> mostrarTelaChamadaSeNecessario()
+          }}
+        }}
+
+        agendarNovaConsulta()
       }}
     }}.start()
   }}
 
-  private fun encerrarChamadaExpirada() {{
-    if (!monitorandoTentativa || isFinishing) {{
+  private fun encerrarChamadaExpirada(mensagem: String) {{
+    if (isFinishing) {{
       return
     }}
 
-    monitorandoTentativa = false
+    pararMonitoramentoTentativa()
+    CornelioCorridaNativaStore.limpar(this)
     cancelarNotificacao()
-    Toast.makeText(
-      this,
-      "Chamada expirada. Enviada para outro motorista.",
-      Toast.LENGTH_LONG
-    ).show()
-    intent.replaceExtras(android.os.Bundle())
-    finishAndRemoveTask()
+    Toast.makeText(this, mensagem, Toast.LENGTH_LONG).show()
+    intent.replaceExtras(Bundle())
+    finish()
   }}
 
-  private fun montarTela() {{
+  private fun montarTelaCarregando() {{
+    estadoTela = "carregando"
+
+    val root = LinearLayout(this)
+    root.orientation = LinearLayout.VERTICAL
+    root.gravity = Gravity.CENTER
+    root.setPadding(42, 56, 42, 42)
+    root.setBackgroundColor(Color.rgb(11, 18, 32))
+
+    val titulo = TextView(this)
+    titulo.text = "Verificando corrida..."
+    titulo.textSize = 27f
+    titulo.setTextColor(Color.WHITE)
+    titulo.gravity = Gravity.CENTER
+    root.addView(titulo)
+
+    setContentView(root)
+  }}
+
+  private fun mostrarTelaChamadaSeNecessario() {{
+    if (estadoTela != "tentando_motorista") {{
+      montarTelaChamada()
+    }}
+  }}
+
+  private fun mostrarTelaCorridaAceitaSeNecessario() {{
+    if (estadoTela != "aceita") {{
+      montarTelaCorridaAceita()
+    }}
+  }}
+
+  private fun montarTelaChamada() {{
+    estadoTela = "tentando_motorista"
+
     val cliente = extra("cliente").ifBlank {{ "Cliente" }}
     val endereco = extra("endereco").ifBlank {{ "Endereco nao informado" }}
     val distancia = extra("distancia")
@@ -275,8 +484,10 @@ class CornelioIncomingCallActivity : Activity() {{
     setContentView(scroll)
   }}
 
-
   private fun montarTelaCorridaAceita() {{
+    estadoTela = "aceita"
+    CornelioCorridaNativaStore.salvarIntent(this, intent)
+
     val endereco = extra("endereco").ifBlank {{ "Endereco nao informado" }}
     val cliente = extra("cliente").ifBlank {{ "Cliente" }}
     val distancia = extra("distancia")
@@ -382,9 +593,9 @@ class CornelioIncomingCallActivity : Activity() {{
         "https://www.google.com/maps/search/?api=1&query=" + URLEncoder.encode(endereco, "UTF-8")
       }}
 
-      val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      startActivity(intent)
+      val mapaIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+      mapaIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      startActivity(mapaIntent)
     }} catch (e: Exception) {{
       Toast.makeText(this, "Erro ao abrir navegacao: " + e.message, Toast.LENGTH_LONG).show()
     }}
@@ -429,7 +640,9 @@ class CornelioIncomingCallActivity : Activity() {{
           if (ok) {{
             if (acao == "aceitar") {{
               Toast.makeText(this, "Chamada aceita", Toast.LENGTH_LONG).show()
+              CornelioCorridaNativaStore.salvarIntent(this, intent)
               montarTelaCorridaAceita()
+              iniciarMonitoramentoTentativa()
             }} else {{
               val mensagem = when (acao) {{
                 "recusar" -> "Chamada recusada"
@@ -439,25 +652,25 @@ class CornelioIncomingCallActivity : Activity() {{
               }}
 
               Toast.makeText(this, mensagem, Toast.LENGTH_LONG).show()
+              CornelioCorridaNativaStore.limpar(this)
 
               if (acao == "cancelar" || acao == "finalizar") {{
                 abrirAppPrincipal()
               }}
 
-              intent.replaceExtras(android.os.Bundle())
-              finishAndRemoveTask()
+              intent.replaceExtras(Bundle())
+              finish()
             }}
           }} else {{
-            cancelarNotificacao()
-            Toast.makeText(this, "Chamada indisponivel", Toast.LENGTH_LONG).show()
-            intent.replaceExtras(android.os.Bundle())
-            finishAndRemoveTask()
+            // O backend e a fonte oficial: consulta o estado antes de fechar a tela.
+            Toast.makeText(this, "Atualizando estado da corrida...", Toast.LENGTH_SHORT).show()
+            iniciarMonitoramentoTentativa()
           }}
         }}
       }} catch (e: Exception) {{
         runOnUiThread {{
-          Toast.makeText(this, "Erro: " + e.message, Toast.LENGTH_LONG).show()
-          finish()
+          Toast.makeText(this, "Falha de conexao. Verificando corrida...", Toast.LENGTH_LONG).show()
+          iniciarMonitoramentoTentativa()
         }}
       }}
     }}.start()
@@ -466,14 +679,11 @@ class CornelioIncomingCallActivity : Activity() {{
   private fun cancelarNotificacao() {{
     try {{
       val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      val notificationId = notificationIdAtual()
 
-      val notificationId = intent.getIntExtra("notificationId", 0)
       if (notificationId != 0) {{
         manager.cancel(notificationId)
       }}
-
-      // Limpeza defensiva: remove qualquer vestigio de notificacao/fullscreen antigo.
-      manager.cancelAll()
     }} catch (_: Exception) {{}}
   }}
 
@@ -490,15 +700,15 @@ class CornelioIncomingCallActivity : Activity() {{
 '''
 
 activity_file.write_text(activity_code, encoding="utf-8")
-print("CornelioIncomingCallActivity criada")
+print("CornelioIncomingCallActivity nativa exclusiva criada")
 
 service_file = main.parent / "CornelioFirebaseMessagingService.kt"
 
 service_code = f'''package {package_name}
 
+import android.app.ActivityManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.ActivityManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -520,14 +730,21 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
       return
     }}
 
-    if (aplicativoEmPrimeiroPlano()) {{
-      return
+    val notificationId = try {{
+      kotlin.math.abs(("corrida-" + (data["idChamada"] ?: "")).hashCode())
+    }} catch (_: Exception) {{
+      991199
     }}
 
+    CornelioCorridaNativaStore.salvar(this, data, notificationId)
     acordarTela()
-    mostrarNotificacaoCorrida(data)
-  }}
 
+    if (aplicativoEmPrimeiroPlano()) {{
+      abrirTelaNativa(notificationId)
+    }} else {{
+      mostrarNotificacaoCorrida(data, notificationId)
+    }}
+  }}
 
   private fun aplicativoEmPrimeiroPlano(): Boolean {{
     return try {{
@@ -539,12 +756,18 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
         processo.pid == pid &&
           (
             processo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND ||
-            processo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
+              processo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
           )
       }}
     }} catch (_: Exception) {{
       false
     }}
+  }}
+
+  private fun abrirTelaNativa(notificationId: Int) {{
+    val callIntent = CornelioCorridaNativaStore.criarIntent(this) ?: return
+    callIntent.putExtra("notificationId", notificationId)
+    startActivity(callIntent)
   }}
 
   private fun acordarTela() {{
@@ -560,27 +783,11 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
     }} catch (_: Exception) {{}}
   }}
 
-  private fun mostrarNotificacaoCorrida(data: Map<String, String>) {{
-    val channelId = "corridas_urgentes_v12"
-    val notificationId = try {{
-      kotlin.math.abs(("corrida-" + (data["idChamada"] ?: "")).hashCode())
-    }} catch (_: Exception) {{
-      991199
-    }}
-
+  private fun mostrarNotificacaoCorrida(data: Map<String, String>, notificationId: Int) {{
+    val channelId = "corridas_urgentes_native_only_v2"
     criarCanal(channelId)
 
-    val callIntent = Intent(this, CornelioIncomingCallActivity::class.java)
-    callIntent.addFlags(
-      Intent.FLAG_ACTIVITY_NEW_TASK or
-        Intent.FLAG_ACTIVITY_CLEAR_TOP or
-        Intent.FLAG_ACTIVITY_SINGLE_TOP
-    )
-
-    for ((key, value) in data) {{
-      callIntent.putExtra(key, value)
-    }}
-
+    val callIntent = CornelioCorridaNativaStore.criarIntent(this) ?: return
     callIntent.putExtra("notificationId", notificationId)
 
     val flags =
@@ -605,8 +812,8 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
       .setPriority(NotificationCompat.PRIORITY_MAX)
       .setCategory(NotificationCompat.CATEGORY_CALL)
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-      .setOngoing(false)
-      .setAutoCancel(true)
+      .setOngoing(true)
+      .setAutoCancel(false)
       .setTimeoutAfter(45000)
       .setDefaults(NotificationCompat.DEFAULT_ALL)
       .setVibrate(longArrayOf(0, 700, 300, 700, 300, 700))
@@ -642,7 +849,64 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
 '''
 
 service_file.write_text(service_code, encoding="utf-8")
-print("CornelioFirebaseMessagingService atualizado")
+print("CornelioFirebaseMessagingService nativo exclusivo atualizado")
+
+# MainActivity: ao tocar no icone/voltar ao app, reabre a Activity nativa salva.
+main_text = main.read_text(encoding="utf-8")
+
+if "private var abrindoCorridaNativaSalva" not in main_text:
+    class_match = re.search(r"class\s+MainActivity[^{]*\{", main_text)
+    if not class_match:
+        raise SystemExit("Nao encontrei abertura da classe MainActivity")
+
+    insert_pos = class_match.end()
+    main_text = (
+        main_text[:insert_pos]
+        + "\n  private var abrindoCorridaNativaSalva = false\n"
+        + main_text[insert_pos:]
+    )
+
+if "abrirCorridaNativaSalvaSeNecessario()" not in main_text:
+    old_resume = '''  override fun onResume() {
+    super.onResume()
+    habilitarTelaCheiaSobreBloqueio()
+  }'''
+    new_resume = '''  override fun onResume() {
+    super.onResume()
+    habilitarTelaCheiaSobreBloqueio()
+    abrirCorridaNativaSalvaSeNecessario()
+  }'''
+
+    if old_resume not in main_text:
+        raise SystemExit("Nao encontrei onResume gerado pelo patch de lockscreen")
+
+    main_text = main_text.replace(old_resume, new_resume, 1)
+
+    helper = '''
+
+  private fun abrirCorridaNativaSalvaSeNecessario() {
+    if (abrindoCorridaNativaSalva) {
+      return
+    }
+
+    val corridaIntent = CornelioCorridaNativaStore.criarIntent(this) ?: return
+    abrindoCorridaNativaSalva = true
+    startActivity(corridaIntent)
+
+    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+      abrindoCorridaNativaSalva = false
+    }, 1200)
+  }
+'''
+
+    ultimo_fecha = main_text.rfind("\n}")
+    if ultimo_fecha < 0:
+        raise SystemExit("Nao encontrei fechamento da MainActivity")
+
+    main_text = main_text[:ultimo_fecha] + helper + main_text[ultimo_fecha:]
+
+main.write_text(main_text, encoding="utf-8")
+print("MainActivity configurada para restaurar somente a tela nativa")
 
 manifest = Path("android/app/src/main/AndroidManifest.xml")
 text = manifest.read_text(encoding="utf-8")
@@ -651,6 +915,7 @@ activity_decl = '''    <activity
       android:name=".CornelioIncomingCallActivity"
       android:exported="false"
       android:excludeFromRecents="true"
+      android:launchMode="singleTask"
       android:showWhenLocked="true"
       android:turnScreenOn="true" />
 '''
@@ -671,4 +936,4 @@ if "CornelioFirebaseMessagingService" not in text:
     text = text.replace("</application>", service_decl + "\n  </application>")
 
 manifest.write_text(text, encoding="utf-8")
-print("Manifest atualizado")
+print("Manifest atualizado para fluxo nativo exclusivo")

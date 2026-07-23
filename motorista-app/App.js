@@ -16,7 +16,7 @@ import * as TaskManager from "expo-task-manager";
 import * as SecureStore from "expo-secure-store";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
-import notifee, { EventType, AndroidImportance, AndroidCategory, AndroidVisibility } from "@notifee/react-native";
+import notifee, { AndroidImportance } from "@notifee/react-native";
 import messaging from "@react-native-firebase/messaging";
 import { io } from "socket.io-client";
 
@@ -153,7 +153,7 @@ export default function App() {
   const [motoristaLogado, setMotoristaLogado] = useState(null);
   const [tokenSessao, setTokenSessao] = useState(null);
   const [statusPush, setStatusPush] = useState("Configurando notificacÃµes...");
-  const [statusFcm, setStatusFcm] = useState("Preparando chamada em tela cheia...");
+  const [statusFcm, setStatusFcm] = useState("Preparando tela nativa...");
   const [restaurandoSessao, setRestaurandoSessao] = useState(true);
 
   async function configurarNotificacoesPush() {
@@ -259,7 +259,7 @@ export default function App() {
       const token = await messaging().getToken();
 
       fcmTokenRef.current = token;
-      setStatusFcm("Tela cheia preparada");
+      setStatusFcm("Tela nativa preparada");
       console.log("FCM token motorista:", token);
 
       return token;
@@ -641,48 +641,11 @@ export default function App() {
     configurarNotificacoesPush();
     configurarFcmDireto();
 
-    const respostaInicial = Notifications.getLastNotificationResponse();
-    if (respostaInicial) {
-      tratarRespostaNotificacao(respostaInicial);
-      Notifications.clearLastNotificationResponse();
-    }
-
-    notifee.getInitialNotification().then((initialNotification) => {
-      if (initialNotification?.notification?.data) {
-        tratarChamadaNativa(
-          initialNotification.notification.data,
-          initialNotification.pressAction?.id || "default"
-        );
-      }
-    }).catch((error) => {
-      console.log("Erro ao verificar notificacao inicial:", error.message);
-    });
-
-    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      tratarRespostaNotificacao(response);
-      Notifications.clearLastNotificationResponse();
-    });
-
-    const unsubscribeNotifee = notifee.onForegroundEvent(({ type, detail }) => {
-      if (type === EventType.PRESS || type === EventType.ACTION_PRESS) {
-        tratarChamadaNativa(
-          detail.notification?.data || {},
-          detail.pressAction?.id || "default"
-        );
-      }
-    });
-
-    const unsubscribeFcmForeground = messaging().onMessage(async (remoteMessage) => {
-      const dados = remoteMessage?.data || {};
-
-      if (dados.tipo === "nova_corrida_motorista") {
-        await tratarChamadaNativa(dados, "default");
-      }
-    });
-
+    // Corridas sao exibidas e controladas exclusivamente pela Activity Android nativa.
+    // O React mantem apenas login, conexao, GPS e renovacao do token FCM.
     const unsubscribeToken = messaging().onTokenRefresh((novoToken) => {
       fcmTokenRef.current = novoToken;
-      setStatusFcm("Tela cheia preparada");
+      setStatusFcm("Tela nativa preparada");
 
       salvarSessaoMotorista({ fcmToken: novoToken }).catch((error) => {
         console.log("Nao foi possivel salvar FCM atualizado:", error.message);
@@ -696,9 +659,6 @@ export default function App() {
     });
 
     return () => {
-      subscription.remove();
-      unsubscribeNotifee();
-      unsubscribeFcmForeground();
       unsubscribeToken();
     };
   }, []);
@@ -1254,26 +1214,18 @@ export default function App() {
           }
 
           if (resposta.corridaAtiva) {
-            console.log("Corrida ativa recuperada ao ficar online:", resposta.corridaAtiva);
-
-            setChamadaAtual({
-              idChamada: resposta.corridaAtiva.idChamada,
-              cliente: resposta.corridaAtiva.cliente || "Cliente",
-              endereco: resposta.corridaAtiva.endereco || "Endereco nao informado",
-              observacao: resposta.corridaAtiva.observacao || "",
-              latitudePassageiro: resposta.corridaAtiva.latitudePassageiro,
-              longitudePassageiro: resposta.corridaAtiva.longitudePassageiro,
-              distancia: resposta.corridaAtiva.distancia || "",
-              tempo: resposta.corridaAtiva.tempo || "",
-              origem: resposta.corridaAtiva.origem || "Despacho",
-              tokenTentativa: resposta.corridaAtiva.tokenTentativa || "",
-            });
-
-            setCorridaAceita(true);
+            console.log(
+              "Corrida aberta recuperada pelo backend; a interface permanece na Activity Android nativa:",
+              resposta.corridaAtiva.idChamada
+            );
             await iniciarMonitoramentoLocalizacao("alta_precisao");
           } else {
             await iniciarMonitoramentoLocalizacao("economico");
           }
+
+          // Nunca recria card de corrida dentro do React.
+          setChamadaAtual(null);
+          setCorridaAceita(false);
 
           onlineRef.current = true;
           setOnline(true);
@@ -1291,15 +1243,9 @@ export default function App() {
       setOnline(false);
       setLocalizacao(null);
 
-      if (chamadaAtual && corridaAceita) {
-        console.log(
-          "Motorista ficou offline, mas corrida aceita continua visivel:",
-          chamadaAtual.idChamada
-        );
-      } else {
-        setChamadaAtual(null);
-        setCorridaAceita(false);
-      }
+      // A corrida nunca e renderizada pelo React; a Activity nativa consulta o backend.
+      setChamadaAtual(null);
+      setCorridaAceita(false);
 
       setModoLocalizacao("economico");
       await salvarSessaoMotorista({ desejaOnline: false });
@@ -1502,11 +1448,11 @@ export default function App() {
   }
 
   return (
-    <ScrollView contentContainerStyle={[styles.container, chamadaAtual && !corridaAceita ? styles.containerChamadaAtiva : null]}>
+    <ScrollView contentContainerStyle={styles.container}>
       <StatusBar barStyle="light-content" />
 
       <Text style={styles.titulo}>Cornelio Move</Text>
-      <Text style={styles.subtitulo}>App do Mototaxista - V10.8</Text>
+      <Text style={styles.subtitulo}>App do Mototaxista - V11.0</Text>
 
       <View style={styles.conexaoLinha}>
         <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
@@ -1515,95 +1461,44 @@ export default function App() {
         </Text>
       </View>
 
-      {chamadaAtual && !corridaAceita && (
-        <View style={styles.cardChamadaPrioritaria}>
-          <Text style={styles.chamadaTitulo}>Nova chamada</Text>
+      <View style={styles.cardStatus}>
+        <Text style={styles.label}>Status do motorista</Text>
 
-          <Text style={styles.info}>Cliente: {chamadaAtual.cliente}</Text>
-          <Text style={styles.enderecoChamada}>{chamadaAtual.endereco}</Text>
-          <View style={styles.linhaResumoChamada}>
-            <Text style={styles.resumoChamada}>{chamadaAtual.distancia}</Text>
-            <Text style={styles.resumoChamada}>{chamadaAtual.tempo}</Text>
-          </View>
+        <Text style={online ? styles.verdeGrande : styles.vermelhoGrande}>
+          {online ? "ONLINE" : "OFFLINE"}
+        </Text>
 
-          {chamadaAtual.observacao && (
-            <Text style={styles.info}>Obs: {chamadaAtual.observacao}</Text>
-          )}
-
-          <View style={styles.linhaBotoesChamada}>
-            <TouchableOpacity style={styles.botaoRecusarGrande} onPress={recusarChamada}>
-              <Text style={styles.textoBotaoGrande}>Recusar</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.botaoAceitarGrande} onPress={aceitarChamada}>
-              <Text style={styles.textoBotaoGrande}>Aceitar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {(!chamadaAtual || corridaAceita) && (
-        <View style={styles.cardStatus}>
-          <Text style={styles.label}>Status do motorista</Text>
-
-          <Text style={online ? styles.verdeGrande : styles.vermelhoGrande}>
-            {online ? "ONLINE" : "OFFLINE"}
+        <TouchableOpacity
+          style={online ? styles.botaoVermelho : styles.botaoVerde}
+          onPress={ficarOnlineOffline}
+          disabled={carregando}
+        >
+          <Text style={styles.textoBotao}>
+            {carregando ? "Buscando GPS..." : online ? "Ficar Offline" : "Ficar Online"}
           </Text>
+        </TouchableOpacity>
 
-          <TouchableOpacity
-            style={online ? styles.botaoVermelho : styles.botaoVerde}
-            onPress={ficarOnlineOffline}
-            disabled={carregando}
-          >
-            <Text style={styles.textoBotao}>
-              {carregando ? "Buscando GPS..." : online ? "Ficar Offline" : "Ficar Online"}
-            </Text>
-          </TouchableOpacity>
-
-          {online && (
-            <Text style={styles.modoTexto}>
-              GPS: {modoLocalizacao === "alta_precisao" ? "Alta precisao" : "Economico"}
-            </Text>
-          )}
-
-          {localizacao && (
-            <View style={styles.caixaLocalizacaoCompacta}>
-              <Text style={styles.localizacaoTexto}>
-                Precisao GPS: {Math.round(localizacao.accuracy)} m
-              </Text>
-            </View>
-          )}
-        </View>
-      )}
-
-      {!chamadaAtual && (
-        <View style={styles.cardAguardando}>
-          <Text style={styles.aguardandoTitulo}>Aguardando chamada</Text>
-          <Text style={styles.aguardandoTexto}>
-            Quando o painel despachar uma corrida, ela aparecera aqui.
+        {online && (
+          <Text style={styles.modoTexto}>
+            GPS: {modoLocalizacao === "alta_precisao" ? "Alta precisao" : "Economico"}
           </Text>
-        </View>
-      )}
+        )}
 
-      {chamadaAtual && corridaAceita && (
-        <View style={styles.cardAceita}>
-          <Text style={styles.chamadaTitulo}>Corrida aceita</Text>
-          <Text style={styles.info}>Va ate:</Text>
-          <Text style={styles.endereco}>{chamadaAtual.endereco}</Text>
+        {localizacao && (
+          <View style={styles.caixaLocalizacaoCompacta}>
+            <Text style={styles.localizacaoTexto}>
+              Precisao GPS: {Math.round(localizacao.accuracy)} m
+            </Text>
+          </View>
+        )}
+      </View>
 
-          <TouchableOpacity style={styles.botaoAzul} onPress={abrirNavegacao}>
-            <Text style={styles.textoBotao}>Abrir navegacao</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.botaoCancelar} onPress={cancelarCorrida}>
-            <Text style={styles.textoBotao}>Cancelar corrida</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.botaoPreto} onPress={finalizarCorrida}>
-            <Text style={styles.textoBotao}>Finalizar corrida</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      <View style={styles.cardAguardando}>
+        <Text style={styles.aguardandoTitulo}>Aguardando chamada</Text>
+        <Text style={styles.aguardandoTexto}>
+          Novas corridas serao abertas somente na tela Android nativa.
+        </Text>
+      </View>
 
       <View style={styles.cardConta}>
         <Text style={styles.label}>Conta do motorista</Text>
