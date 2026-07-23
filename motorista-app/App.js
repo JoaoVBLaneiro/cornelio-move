@@ -153,7 +153,7 @@ export default function App() {
   const [motoristaLogado, setMotoristaLogado] = useState(null);
   const [tokenSessao, setTokenSessao] = useState(null);
   const [statusPush, setStatusPush] = useState("Configurando notificacÃµes...");
-  const [statusFcm, setStatusFcm] = useState("Preparando tela nativa...");
+  const [statusFcm, setStatusFcm] = useState("");
   const [restaurandoSessao, setRestaurandoSessao] = useState(true);
 
   async function configurarNotificacoesPush() {
@@ -259,7 +259,7 @@ export default function App() {
       const token = await messaging().getToken();
 
       fcmTokenRef.current = token;
-      setStatusFcm("Tela nativa preparada");
+      setStatusFcm("");
       console.log("FCM token motorista:", token);
 
       return token;
@@ -645,7 +645,7 @@ export default function App() {
     // O React mantem apenas login, conexao, GPS e renovacao do token FCM.
     const unsubscribeToken = messaging().onTokenRefresh((novoToken) => {
       fcmTokenRef.current = novoToken;
-      setStatusFcm("Tela nativa preparada");
+      setStatusFcm("");
 
       salvarSessaoMotorista({ fcmToken: novoToken }).catch((error) => {
         console.log("Nao foi possivel salvar FCM atualizado:", error.message);
@@ -689,7 +689,7 @@ export default function App() {
     if (!BACKEND_URL) {
       Alert.alert(
         "Configuracao incompleta",
-        "Configure EXPO_PUBLIC_BACKEND_URL no arquivo .env do app motorista."
+        "Conexao do aplicativo nao configurada."
       );
       return;
     }
@@ -834,7 +834,7 @@ export default function App() {
     const loginLimpo = login.trim();
 
     if (!BACKEND_URL) {
-      Alert.alert("Configuracao incompleta", "Servidor nao configurado.");
+      Alert.alert("Configuracao incompleta", "Conexao do aplicativo nao configurada.");
       return;
     }
 
@@ -885,7 +885,7 @@ export default function App() {
      } catch (error) {
   Alert.alert(
     "Erro de conexao",
-    `Servidor: ${BACKEND_URL}\nErro: ${error.message}`
+    `Erro: ${error.message}`
   );
 }
      finally {
@@ -1168,7 +1168,7 @@ export default function App() {
     }
 
     if (!conectado) {
-      Alert.alert("Sem conexao", "O app ainda nao conectou ao backend.");
+      Alert.alert("Sem conexao", "O app ainda nao conectou.");
       return;
     }
 
@@ -1409,7 +1409,7 @@ export default function App() {
         <View style={styles.conexaoLinha}>
           <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
           <Text style={styles.conexaoTexto}>
-            {conectado ? "Backend conectado" : "Backend desconectado"}
+            {conectado ? "Conectado" : "Desconectado"}
           </Text>
         </View>
 
@@ -1452,12 +1452,12 @@ export default function App() {
       <StatusBar barStyle="light-content" />
 
       <Text style={styles.titulo}>Cornelio Move</Text>
-      <Text style={styles.subtitulo}>App do Mototaxista - V11.0</Text>
+      <Text style={styles.subtitulo}>App do Mototaxista - V11.1</Text>
 
       <View style={styles.conexaoLinha}>
         <View style={[styles.bolinhaConexao, conectado ? styles.bolinhaVerde : styles.bolinhaVermelha]} />
         <Text style={styles.conexaoTexto}>
-          {conectado ? "Backend conectado" : "Backend desconectado"} - {statusFcm}
+          {conectado ? "Conectado" : "Desconectado"}
         </Text>
       </View>
 
@@ -1483,21 +1483,6 @@ export default function App() {
             GPS: {modoLocalizacao === "alta_precisao" ? "Alta precisao" : "Economico"}
           </Text>
         )}
-
-        {localizacao && (
-          <View style={styles.caixaLocalizacaoCompacta}>
-            <Text style={styles.localizacaoTexto}>
-              Precisao GPS: {Math.round(localizacao.accuracy)} m
-            </Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.cardAguardando}>
-        <Text style={styles.aguardandoTitulo}>Aguardando chamada</Text>
-        <Text style={styles.aguardandoTexto}>
-          Novas corridas serao abertas somente na tela Android nativa.
-        </Text>
       </View>
 
       <View style={styles.cardConta}>
