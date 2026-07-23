@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cornelio Move Motorista",
     "slug": "motorista-app",
-    "version": "1.0.114",
+    "version": "1.0.115",
     "icon": "./assets/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
@@ -11,11 +11,11 @@
     ],
     "android": {
       "package": "com.corneliomove.motorista",
-      "versionCode": 114,
+      "versionCode": 115,
       "icon": "./assets/icon.png",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#FCC103"
       },
       "permissions": [
         "android.permission.INTERNET",

@@ -35,10 +35,13 @@ activity_file = main.parent / "CornelioIncomingCallActivity.kt"
 activity_code = f'''package {package_name}
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.KeyguardManager
 import android.app.NotificationManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -59,6 +62,7 @@ import java.net.URL
 import java.net.URLEncoder
 
 object CornelioCorridaNativaStore {{
+  const val ACTION_CORRIDA_CANCELADA = "com.corneliomove.motorista.ACTION_CORRIDA_CANCELADA"
   private const val PREFS = "cornelio_corrida_nativa_v2"
   private const val ATIVA = "ativa"
   private const val NOTIFICATION_ID = "notificationId"
@@ -159,6 +163,29 @@ object CornelioCorridaNativaStore {{
 
 class CornelioIncomingCallActivity : Activity() {{
 
+  private var cancelamentoReceiverRegistrado = false
+  private var dialogoCancelamentoAberto = false
+
+  private val cancelamentoReceiver = object : BroadcastReceiver() {{
+    override fun onReceive(context: Context?, receivedIntent: Intent?) {{
+      if (receivedIntent?.action != CornelioCorridaNativaStore.ACTION_CORRIDA_CANCELADA) {{
+        return
+      }}
+
+      val idCancelado = receivedIntent.getStringExtra("idChamada") ?: ""
+      val idAtual = extra("idChamada")
+
+      if (idCancelado.isNotBlank() && idAtual.isNotBlank() && idCancelado != idAtual) {{
+        return
+      }}
+
+      val mensagem = receivedIntent.getStringExtra("mensagem")
+        ?: "O cliente cancelou a corrida."
+
+      mostrarCancelamentoRecebido(mensagem)
+    }}
+  }}
+
   private val backendUrl = "http://207.180.245.177:3001"
 
   private fun dp(valor: Int): Int =
@@ -180,6 +207,35 @@ class CornelioIncomingCallActivity : Activity() {{
     CornelioCorridaNativaStore.salvarIntent(this, intent)
     montarTelaCarregando()
     iniciarMonitoramentoTentativa()
+  }}
+
+  override fun onStart() {{
+    super.onStart()
+
+    if (!cancelamentoReceiverRegistrado) {{
+      val filtro = IntentFilter(CornelioCorridaNativaStore.ACTION_CORRIDA_CANCELADA)
+
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {{
+        registerReceiver(cancelamentoReceiver, filtro, Context.RECEIVER_NOT_EXPORTED)
+      }} else {{
+        @Suppress("DEPRECATION")
+        registerReceiver(cancelamentoReceiver, filtro)
+      }}
+
+      cancelamentoReceiverRegistrado = true
+    }}
+  }}
+
+  override fun onStop() {{
+    if (cancelamentoReceiverRegistrado) {{
+      try {{
+        unregisterReceiver(cancelamentoReceiver)
+      }} catch (_: Exception) {{}}
+
+      cancelamentoReceiverRegistrado = false
+    }}
+
+    super.onStop()
   }}
 
   override fun onNewIntent(novoIntent: Intent?) {{
@@ -343,6 +399,29 @@ class CornelioIncomingCallActivity : Activity() {{
         agendarNovaConsulta()
       }}
     }}.start()
+  }}
+
+  private fun mostrarCancelamentoRecebido(mensagem: String) {{
+    if (isFinishing || dialogoCancelamentoAberto) {{
+      return
+    }}
+
+    dialogoCancelamentoAberto = true
+    pararMonitoramentoTentativa()
+    CornelioCorridaNativaStore.limpar(this)
+    cancelarNotificacao()
+
+    AlertDialog.Builder(this)
+      .setTitle("Corrida cancelada")
+      .setMessage(mensagem)
+      .setCancelable(false)
+      .setPositiveButton("OK") {{ _, _ ->
+        dialogoCancelamentoAberto = false
+        abrirAppPrincipal()
+        intent.replaceExtras(Bundle())
+        finish()
+      }}
+      .show()
   }}
 
   private fun encerrarChamadaExpirada(mensagem: String) {{
@@ -739,10 +818,13 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
 
     val data = remoteMessage.data
 
-    if (data["tipo"] != "nova_corrida_motorista") {{
-      return
+    when (data["tipo"]) {{
+      "nova_corrida_motorista" -> tratarNovaCorrida(data)
+      "corrida_cancelada_motorista" -> tratarCorridaCancelada(data, remoteMessage)
     }}
+  }}
 
+  private fun tratarNovaCorrida(data: Map<String, String>) {{
     val notificationId = try {{
       kotlin.math.abs(("corrida-" + (data["idChamada"] ?: "")).hashCode())
     }} catch (_: Exception) {{
@@ -757,6 +839,37 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
     }} else {{
       mostrarNotificacaoCorrida(data, notificationId)
     }}
+  }}
+
+  private fun tratarCorridaCancelada(
+    data: Map<String, String>,
+    remoteMessage: RemoteMessage
+  ) {{
+    val idChamada = data["idChamada"] ?: ""
+    val idSalvo = CornelioCorridaNativaStore.valor(this, "idChamada")
+    val mensagem = data["mensagem"]
+      ?: remoteMessage.notification?.body
+      ?: "O cliente cancelou a corrida."
+
+    if (idChamada.isBlank() || idSalvo.isBlank() || idChamada == idSalvo) {{
+      try {{
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationIdCorrida = CornelioCorridaNativaStore.notificationId(this)
+        if (notificationIdCorrida != 0) {{
+          manager.cancel(notificationIdCorrida)
+        }}
+      }} catch (_: Exception) {{}}
+
+      CornelioCorridaNativaStore.limpar(this)
+    }}
+
+    val broadcast = Intent(CornelioCorridaNativaStore.ACTION_CORRIDA_CANCELADA)
+      .setPackage(packageName)
+      .putExtra("idChamada", idChamada)
+      .putExtra("mensagem", mensagem)
+
+    sendBroadcast(broadcast)
+    mostrarNotificacaoCancelamento(idChamada, mensagem)
   }}
 
   private fun aplicativoEmPrimeiroPlano(): Boolean {{
@@ -798,7 +911,7 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
 
   private fun mostrarNotificacaoCorrida(data: Map<String, String>, notificationId: Int) {{
     val channelId = "corridas_urgentes_native_only_v2"
-    criarCanal(channelId)
+    criarCanalCorridas(channelId)
 
     val callIntent = CornelioCorridaNativaStore.criarIntent(this) ?: return
     callIntent.putExtra("notificationId", notificationId)
@@ -838,7 +951,70 @@ class CornelioFirebaseMessagingService : FirebaseMessagingService() {{
     manager.notify(notificationId, notification)
   }}
 
-  private fun criarCanal(channelId: String) {{
+  private fun mostrarNotificacaoCancelamento(idChamada: String, mensagem: String) {{
+    val channelId = "avisos_cancelamento_corrida_v1"
+    criarCanalCancelamento(channelId)
+
+    val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+      ?: Intent(this, MainActivity::class.java)
+    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+
+    val notificationId = try {{
+      kotlin.math.abs(("cancelamento-" + idChamada).hashCode())
+    }} catch (_: Exception) {{
+      992299
+    }}
+
+    val flags =
+      PendingIntent.FLAG_UPDATE_CURRENT or
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+
+    val pendingIntent = PendingIntent.getActivity(
+      this,
+      notificationId,
+      launchIntent,
+      flags
+    )
+
+    val notification = NotificationCompat.Builder(this, channelId)
+      .setSmallIcon(applicationInfo.icon)
+      .setContentTitle("Corrida cancelada")
+      .setContentText(mensagem)
+      .setStyle(NotificationCompat.BigTextStyle().bigText(mensagem))
+      .setPriority(NotificationCompat.PRIORITY_MAX)
+      .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+      .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+      .setAutoCancel(true)
+      .setDefaults(NotificationCompat.DEFAULT_ALL)
+      .setVibrate(longArrayOf(0, 500, 250, 500))
+      .setContentIntent(pendingIntent)
+      .build()
+
+    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    manager.notify(notificationId, notification)
+  }}
+
+  private fun criarCanalCancelamento(channelId: String) {{
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {{
+      return
+    }}
+
+    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    val canal = NotificationChannel(
+      channelId,
+      "Avisos de cancelamento",
+      NotificationManager.IMPORTANCE_HIGH
+    )
+
+    canal.description = "Avisos quando uma corrida e cancelada"
+    canal.enableVibration(true)
+    canal.vibrationPattern = longArrayOf(0, 500, 250, 500)
+    canal.lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+
+    manager.createNotificationChannel(canal)
+  }}
+
+  private fun criarCanalCorridas(channelId: String) {{
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {{
       return
     }}
